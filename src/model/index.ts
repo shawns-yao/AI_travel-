@@ -1,24 +1,44 @@
 import { create } from "zustand";
+import { SSERunEvent, RunStatus, TravelPlanResult } from "@/types";
 
-export interface RecordItem {
-  id: string;
-  name: string;
-  type: "supervisor" | "agent" | "tool";
-  desc: string;
-  content: string;
-  contentType: "json" | "text" | "";
-  createdAt: number;
+interface AppState {
+  // Run state
+  currentRunId: string | null;
+  runStatus: RunStatus | null;
+  events: SSERunEvent[];
+  isRunning: boolean;
+
+  // Results
+  travelPlan: TravelPlanResult | null;
+
+  // Actions
+  setRunId: (id: string) => void;
+  addEvent: (event: SSERunEvent) => void;
+  setRunStatus: (status: RunStatus) => void;
+  setTravelPlan: (plan: TravelPlanResult) => void;
+  setIsRunning: (running: boolean) => void;
+  reset: () => void;
 }
 
-export const useStore = create<{
-  records: RecordItem[];
-  addRecord: (record: RecordItem) => void;
-  clearRecord: () => void;
-}>((set, get) => ({
-  records: [] as RecordItem[],
-  addRecord: (record: RecordItem) => {
-    const records = get().records;
-    set(() => ({ records: [...records, record] }));
-  },
-  clearRecord: () => set({ records: [] }),
+export const useStore = create<AppState>((set) => ({
+  currentRunId: null,
+  runStatus: null,
+  events: [],
+  isRunning: false,
+  travelPlan: null,
+
+  setRunId: (id) => set({ currentRunId: id }),
+  addEvent: (event) =>
+    set((state) => ({ events: [...state.events, event] })),
+  setRunStatus: (status) => set({ runStatus: status }),
+  setTravelPlan: (plan) => set({ travelPlan: plan }),
+  setIsRunning: (running) => set({ isRunning: running }),
+  reset: () =>
+    set({
+      currentRunId: null,
+      runStatus: null,
+      events: [],
+      isRunning: false,
+      travelPlan: null,
+    }),
 }));

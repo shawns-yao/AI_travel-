@@ -1,111 +1,81 @@
-import { RecordItem } from "@/model";
-
-// Agent 相关类型
-export interface Tool {
-  schema: ToolSchema;
-  execute: (
-    params?: any,
-    onCallback?: (executionProgress: Partial<AgentExecution>) => void
-  ) => Promise<any> | any;
-}
-export interface ToolSchema {
-  type: "function";
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, any>;
-  };
+// SSE Event types from backend
+export interface SSERunEvent {
+  type: string;
+  run_id: string;
+  timestamp: number;
+  data: Record<string, unknown>;
 }
 
-export interface Agent {
-  name: string;
-  description: string;
-  inputPrompt: string;
-  inputExample: string;
-  systemPrompt: string;
-  getJSONResult: (
-    input: AgentInput,
-    addRecord?: (record: RecordItem) => void
-  ) => Promise<string>;
-  makeTextResult: (
-    jsonResult: string,
-    addRecord?: (record: RecordItem) => void
-  ) => Promise<string>;
+export type SSEEventType =
+  | "run.created"
+  | "plan.generated"
+  | "step.started"
+  | "tool.called"
+  | "tool.completed"
+  | "memory.hit"
+  | "agent.completed"
+  | "critic.issued"
+  | "replan.started"
+  | "run.completed"
+  | "run.failed";
+
+// Run status
+export interface RunStatus {
+  run_id: string;
+  status: "pending" | "running" | "completed" | "failed" | "replanning";
+  current_agent: string | null;
+  completed_agents: string[];
+  failed_agents: string[];
+  events: SSERunEvent[];
+  result: TravelPlanResult | null;
 }
 
-export interface AgentInput {
-  query: string;
-  context?: Record<string, any>;
-  previousResults?: string[];
-}
-
-export interface ToolDetails {
-  toolName: string;
-  toolDescription: string;
-  toolParameters: Record<string, any>;
-  systemPrompt: string;
-  userPrompt: string;
-}
-
-export interface AgentExecution {
-  agentName: string;
-  step: string;
-  thought?: string;
-  action?: string;
-  observation?: string;
-  result: string;
-  status: "running" | "completed" | "error";
-  startTime: number;
-  endTime?: number;
-  systemPrompt?: string;
-  userPrompt?: string;
-  toolDetails?: ToolDetails;
-}
-
-// 旅行规划相关类型
-export interface TravelPlan {
+// Travel plan result
+export interface TravelPlanResult {
   destination: string;
   duration: number;
+  start_date: string;
+  budget: number;
   preferences: string[];
-  startDate?: string;
-  days: DayPlan[];
-  weather?: WeatherInfo;
-  transportation?: TransportationInfo;
+  weather: WeatherResult | null;
+  daily_plans: DailyPlan[];
+  budget_breakdown: BudgetBreakdown | null;
+  critic_report: CriticReport | null;
+  memory_context: MemoryContext | null;
 }
 
-// 包含所有Agent原始结果的完整数据结构
-export interface AgentResults {
-  analysis: {
-    text: string;
-    json: any;
-  };
-  weather: {
-    text: string;
-    json: any;
-  };
-  planner: {
-    text: string;
-    json: any;
-  };
+export interface WeatherResult {
+  forecast: DailyWeather[];
+  risk_analysis: string;
 }
 
-export interface DayPlan {
+export interface DailyWeather {
+  date: string;
+  condition: string;
+  temp_high: number;
+  temp_low: number;
+  humidity: number;
+  recommendation: string;
+}
+
+export interface DailyPlan {
   day: number;
   date: string;
   activities: Activity[];
   meals: Meal[];
-  notes?: string;
+  notes: string;
 }
 
 export interface Activity {
   id: string;
   name: string;
-  type: "sightseeing" | "shopping" | "entertainment" | "outdoor" | "cultural";
+  type: "sightseeing" | "shopping" | "entertainment" | "outdoor" | "cultural" | "transport";
   description: string;
   location: string;
   duration: string;
   time: string;
-  cost?: string;
+  cost: number;
+  source?: string; // RAG citation
 }
 
 export interface Meal {
@@ -115,48 +85,38 @@ export interface Meal {
   cuisine: string;
   location: string;
   time: string;
-  speciality?: string;
-  cost?: string;
+  cost: number;
 }
 
-// 住宿信息接口已移除
-
-export interface WeatherInfo {
-  forecast: DailyWeather[];
-  recommendations: string[];
+export interface BudgetBreakdown {
+  total_budget: number;
+  allocated: Record<string, number>;
+  spent: number;
+  warnings: string[];
 }
 
-export interface DailyWeather {
-  date: string;
-  temperature: {
-    high: number;
-    low: number;
-  };
-  condition: string;
-  precipitation: number;
-  humidity: number;
+export interface CriticReport {
+  score: number;
+  issues: CriticIssue[];
+  suggestions: string[];
+  needs_replan: boolean;
 }
 
-export interface TransportationInfo {
-  type: "flight" | "train" | "bus" | "car";
-  routes: Route[];
-  recommendations: string[];
+export interface CriticIssue {
+  severity: "low" | "medium" | "high";
+  category: "budget" | "route" | "weather" | "pace" | "preference";
+  description: string;
+  suggestion: string;
 }
 
-export interface Route {
-  from: string;
-  to: string;
-  method: string;
-  duration: string;
-  cost?: string;
-  schedule?: string;
+export interface MemoryContext {
+  short_term: MemoryItem[];
+  long_term: MemoryItem[];
 }
 
-// 表单相关类型
-export interface TravelFormData {
-  destination: string;
-  duration: number;
-  startDate?: string;
-  preferences: string[];
-  extraRequirements?: string;
+export interface MemoryItem {
+  memory_type: string;
+  content: string;
+  confidence: number;
+  source: string;
 }

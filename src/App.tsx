@@ -1,75 +1,86 @@
-import { useEffect, useState } from "react";
-import { AgentResults } from "./types";
-import { AgentCoordinator } from "./agents/coordinator";
-import { SmartSupervisor } from "./agents/dynamic/SmartSupervisor";
+import { useCallback, useState } from "react";
+import { Card } from "./components/ui/card";
+import { useStore } from "./model";
 import PlannerForm from "./components/PlannerForm";
 import AgentStatus from "./components/AgentStatus";
 import PlanResult from "./components/PlanResult";
-import { Card } from "./components/ui/card";
-import { useStore } from "./model";
 
 function App() {
-  const [isPlanning, setIsPlanning] = useState(false);
-  const [travelPlan, setTravelPlan] = useState<AgentResults | null>(null);
+  const isRunning = useStore((s) => s.isRunning);
+  const travelPlan = useStore((s) => s.travelPlan);
+  const events = useStore((s) => s.events);
+  const setIsRunning = useStore((s) => s.setIsRunning);
+  const setTravelPlan = useStore((s) => s.setTravelPlan);
+  const setRunId = useStore((s) => s.setRunId);
+  const addEvent = useStore((s) => s.addEvent);
+  const reset = useStore((s) => s.reset);
+
   const [showReport, setShowReport] = useState(false);
-  const addRecord = useStore((state: any) => state.addRecord);
-  const clearRecord = useStore((state: any) => state.clearRecord);
-  const records = useStore((state: any) => state.records);
-  const [smartMode, setSmartMode] = useState(false);  
 
-  const handlePlanningSubmit = async (input: string) => {
-    setIsPlanning(true);
-    setTravelPlan(null);
+  const handleSubmit = useCallback(async (input: string) => {
+    reset();
+    setIsRunning(true);
     setShowReport(false);
-    clearRecord();
 
-    let result: AgentResults | null = null;
-    if (smartMode) {
-      const smartSupervisor = new SmartSupervisor(addRecord);
-      result = await smartSupervisor.execute(input);
-    } else {
-      const simpleSupervisor = new AgentCoordinator(addRecord);
-      result = await simpleSupervisor.execute(input);
-    }
+    try {
+      const response = await fetch("/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: input }),
+      });
 
-    if (result) {
-      setTravelPlan(result);
+      if (!response.ok) throw new Error("Failed to create run");
+
+      const { run_id } = await response.json();
+      setRunId(run_id);
+
+      // Connect SSE stream
+      const eventSource = new EventSource(`/api/runs/${run_id}/events`);
+
+      eventSource.onmessage = (event) => {
+        const parsed = JSON.parse(event.data);
+        addEvent(parsed);
+
+        if (parsed.type === "run.completed") {
+          setTravelPlan(parsed.data.result);
+          setIsRunning(false);
+          eventSource.close();
+        } else if (parsed.type === "run.failed") {
+          setIsRunning(false);
+          eventSource.close();
+        }
+      };
+
+      eventSource.onerror = () => {
+        setIsRunning(false);
+        eventSource.close();
+      };
+    } catch (error) {
+      console.error("Run failed:", error);
+      setIsRunning(false);
     }
-    setIsPlanning(false);
-  };
+  }, [reset, setIsRunning, setShowReport, setRunId, addEvent, setTravelPlan]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      {/* 绝对定位在右上角的Checkbox元素 */}
-      <div className="absolute top-4 right-4">
-        <input
-          type="checkbox"
-          checked={smartMode}
-          onChange={(e) => setSmartMode(e.target.checked)}
-        />
-        <span className="text-sm text-gray-500 ml-2">智能编排</span>
-      </div>
       <div className="container mx-auto px-4 py-8 max-w-6xl">
-        {/* 表单区域 - 上方 */}
         <div className="mb-8">
           <Card className="p-4 shadow-lg border-0 bg-white/80 backdrop-blur-sm">
             <PlannerForm
-              onSubmit={handlePlanningSubmit}
-              isLoading={isPlanning}
+              onSubmit={handleSubmit}
+              isLoading={isRunning}
               onShowReport={() => setShowReport(true)}
               hasReport={!!travelPlan}
             />
           </Card>
         </div>
 
-        {/* AI状态区域 - 下方 */}
         <div>
           <Card className="p-6 shadow-lg border-0 bg-white/80 backdrop-blur-sm min-h-[500px]">
-            <AgentStatus isPlanning={isPlanning} records={records} />
+            <AgentStatus isPlanning={isRunning} events={events} />
           </Card>
         </div>
 
-        {/* 报告Modal */}
         {showReport && travelPlan && (
           <PlanResult
             plan={travelPlan}

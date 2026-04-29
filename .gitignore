@@ -64,3 +64,19 @@ Thumbs.db
 .idea/
 *.swp
 *.swo 
+.ace-tool/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.env
+
+# Server
+server/.env
+*.db
+*.sqlite3

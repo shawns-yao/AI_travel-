@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
@@ -16,12 +16,11 @@ export default function PlannerForm({
   onShowReport,
   hasReport,
 }: PlannerFormProps) {
-  const [input, setInput] = useState<string>("我想明天去成都玩三天, 请帮我制定一个旅行计划, 预算3000元左右");
+  const [input, setInput] = useState("我想去成都玩三天，预算3000元，喜欢自然风光和美食");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
-
     onSubmit(input);
   };
 
@@ -29,25 +28,24 @@ export default function PlannerForm({
     <div className="w-full">
       <CardHeader className="text-center p-2 pb-6">
         <CardTitle className="text-2xl font-bold text-gray-900">
-          🤖 AI 旅行规划助手
+          AI Travel Agent Platform
         </CardTitle>
+        <p className="text-sm text-gray-500 mt-1">
+          Multi-Agent Intelligent Travel Decision System
+        </p>
       </CardHeader>
 
       <form onSubmit={handleSubmit} className="space-y-2">
-        {/* 目的地输入 */}
         <div className="flex gap-4 items-end">
           <div className="flex-1">
             <Input
-              placeholder="您想去哪里旅行？"
+              placeholder="Describe your travel plan..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               className="min-h-10 text-sm"
               disabled={isLoading}
-              type="textarea"
             />
           </div>
-
-          {/* 开始规划按钮 */}
           <Button
             type="submit"
             disabled={isLoading || !input.trim()}
@@ -57,13 +55,12 @@ export default function PlannerForm({
             {isLoading ? (
               <>
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2" />
-                AI正在规划中...
+                Agents Working...
               </>
             ) : (
-              "🚀 开始AI规划"
+              "Start Planning"
             )}
           </Button>
-          {/* 查看报告按钮 */}
           <Button
             type="button"
             variant="outline"
@@ -72,7 +69,7 @@ export default function PlannerForm({
             size="sm"
             disabled={!hasReport}
           >
-            📋 查看报告
+            View Report
           </Button>
         </div>
       </form>
