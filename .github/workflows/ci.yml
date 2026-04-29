@@ -141,4 +141,4 @@ jobs:
       - name: Build Web image
         run: docker build -f docker/Dockerfile.web -t travel-agent-web:ci .
       - name: Verify image
-        run: docker images travel-agent-api:ci travel-agent-web:ci
+        run: docker image inspect travel-agent-api:ci travel-agent-web:ci >/dev/null

@@ -6,9 +6,9 @@
 
 ![Home Page](docs/images/screenshot-home.png)
 
-![Planning](docs/images/screenshot-planning.png)
+![Planning Page](docs/images/screenshot-planning.png)
 
-![Result](docs/images/screenshot-result.png)
+![Result Page](docs/images/screenshot-result.png)
 
 ## 核心能力
 
