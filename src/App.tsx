@@ -3,6 +3,7 @@ import { Card } from "./components/ui/card";
 import { useStore } from "./model";
 import PlannerForm from "./components/PlannerForm";
 import AgentStatus from "./components/AgentStatus";
+import AgentTraceTree from "./components/AgentTraceTree";
 import PlanResult from "./components/PlanResult";
 
 function App() {
@@ -75,8 +76,11 @@ function App() {
           </Card>
         </div>
 
-        <div>
-          <Card className="p-6 shadow-lg border-0 bg-white/80 backdrop-blur-sm min-h-[500px]">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Card className="p-6 shadow-lg border-0 bg-white/80 backdrop-blur-sm min-h-[400px]">
+            <AgentTraceTree events={events} isRunning={isRunning} />
+          </Card>
+          <Card className="p-6 shadow-lg border-0 bg-white/80 backdrop-blur-sm min-h-[400px]">
             <AgentStatus isPlanning={isRunning} events={events} />
           </Card>
         </div>

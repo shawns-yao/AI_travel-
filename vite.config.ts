@@ -2,7 +2,6 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 
-// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -12,16 +11,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/baidu": {
-        rewrite: (path) => path.replace(/^\/baidu/, ""),
-        target: "https://api.map.baidu.com",
-        changeOrigin: true,
-      },
-      "/qweatherapi": {
-        rewrite: (path) => path.replace(/^\/qweatherapi/, ""),
-        target: "https://m34d92mctd.re.qweatherapi.com",
+      "/api": {
+        target: "http://localhost:8000",
         changeOrigin: true,
       },
     },
   },
-}) 
+})
