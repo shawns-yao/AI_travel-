@@ -20,6 +20,15 @@ from app.core.error_handler import (
     execute_with_timeout,
     retry_with_backoff,
 )
+from app.core.dag import (
+    DAGExecutor,
+    DAGNode,
+    DAGPlan,
+    EventEmitter,
+    SSEEvent,
+    NodeStatus,
+    build_travel_dag,
+)
 
 __all__ = [
     # Agent
@@ -35,6 +44,14 @@ __all__ = [
     "tool_registry",
     # Config
     "settings",
+    # DAG
+    "DAGExecutor",
+    "DAGNode",
+    "DAGPlan",
+    "EventEmitter",
+    "SSEEvent",
+    "NodeStatus",
+    "build_travel_dag",
     # Prompts
     "PromptManager",
     "PromptTemplate",
