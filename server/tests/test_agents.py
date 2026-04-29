@@ -1,6 +1,7 @@
 """Tests for the 5 core agents."""
 
 import uuid
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -68,6 +69,33 @@ class TestAgentProperties:
 # ── Integration: agent execution (requires LLM API key) ────
 
 class TestIntentAgentExecution:
+    def test_normalize_parsed_fills_missing_dates(self):
+        parsed = IntentAgent._normalize_parsed(
+            {
+                "destination": "北京",
+                "duration": 3,
+                "start_date": "",
+                "all_dates": "",
+                "budget": 4000,
+                "preferences": ["轻松"],
+            },
+            "北京3日轻松游，预算4000",
+        )
+
+        start = datetime.strptime(parsed["start_date"], "%Y-%m-%d").date()
+        dates = parsed["all_dates"].split(",")
+
+        assert len(dates) == 3
+        assert dates[0] == parsed["start_date"]
+        assert start == datetime.now().date() + timedelta(days=1)
+
+    def test_fallback_parse_defaults_to_weather_window(self):
+        parsed = IntentAgent._fallback_parse("北京3天，预算4000")
+        start = datetime.strptime(parsed["start_date"], "%Y-%m-%d").date()
+
+        assert start == datetime.now().date() + timedelta(days=1)
+        assert len(parsed["all_dates"].split(",")) == 3
+
     @pytest.mark.integration
     async def test_parse_simple_query(self):
         agent = IntentAgent()

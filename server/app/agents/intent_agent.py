@@ -66,6 +66,7 @@ class IntentAgent(BaseAgent):
                 "extra_requirements": "",
                 "travelers": 1,
             })
+            parsed = self._normalize_parsed(parsed, query)
 
             duration_ms = (time.monotonic() - start) * 1000
             log_agent_done(logger, self.name, context.get("run_id", ""), duration_ms,
@@ -120,7 +121,7 @@ class IntentAgent(BaseAgent):
         preference_words = ["自然风光", "美食", "亲子", "文化", "历史", "博物馆", "轻松", "徒步", "购物", "摄影"]
         preferences = [word for word in preference_words if word in query]
 
-        start = datetime.now().date() + timedelta(days=7)
+        start = IntentAgent._default_start_date()
         all_dates = ",".join((start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(duration))
 
         return {
@@ -133,3 +134,60 @@ class IntentAgent(BaseAgent):
             "extra_requirements": query,
             "travelers": 1,
         }
+
+    @staticmethod
+    def _normalize_parsed(parsed: dict, query: str) -> dict:
+        fallback = IntentAgent._fallback_parse(query)
+        if not isinstance(parsed, dict):
+            return fallback
+
+        normalized = dict(parsed)
+        normalized["destination"] = str(normalized.get("destination") or fallback["destination"])
+        normalized["budget"] = int(normalized.get("budget") or fallback["budget"])
+        normalized["travelers"] = int(normalized.get("travelers") or fallback["travelers"])
+
+        try:
+            duration = int(normalized.get("duration") or fallback["duration"])
+        except (TypeError, ValueError):
+            duration = fallback["duration"]
+        normalized["duration"] = max(1, min(duration, 14))
+
+        preferences = normalized.get("preferences")
+        normalized["preferences"] = preferences if isinstance(preferences, list) else fallback["preferences"]
+
+        start_date = str(normalized.get("start_date") or "").strip()
+        dates = IntentAgent._parse_dates(str(normalized.get("all_dates") or ""))
+
+        if not start_date and dates:
+            start_date = dates[0]
+        start = IntentAgent._parse_date(start_date) or IntentAgent._default_start_date()
+
+        if len(dates) < normalized["duration"]:
+            dates = [
+                (start + timedelta(days=i)).strftime("%Y-%m-%d")
+                for i in range(normalized["duration"])
+            ]
+
+        normalized["start_date"] = start.strftime("%Y-%m-%d")
+        normalized["all_dates"] = ",".join(dates[: normalized["duration"]])
+        normalized.setdefault("extra_requirements", "")
+        return normalized
+
+    @staticmethod
+    def _default_start_date():
+        return datetime.now().date() + timedelta(days=1)
+
+    @staticmethod
+    def _parse_date(value: str):
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _parse_dates(value: str) -> list[str]:
+        return [
+            item.strip()
+            for item in value.split(",")
+            if IntentAgent._parse_date(item.strip())
+        ]
