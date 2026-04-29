@@ -9,7 +9,7 @@ from sqlalchemy import select, text
 
 from app.core.config import settings
 from app.core.logging import get_logger, log_memory_hit, log_memory_write
-from app.db.models import LongTermMemory
+from app.db.models import LongTermMemory, User
 from app.db.session import async_session_factory
 
 
@@ -42,6 +42,15 @@ class LongTermMemoryStore:
         memory_id = uuid.uuid4()
 
         async with async_session_factory() as session:
+            user = await session.get(User, self.user_id)
+            if user is None:
+                user = User(
+                    id=self.user_id,
+                    email=f"{self.user_id}@demo.local",
+                    hashed_password="demo",
+                    display_name="Demo User",
+                )
+                session.add(user)
             memory = LongTermMemory(
                 id=memory_id,
                 user_id=self.user_id,

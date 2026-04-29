@@ -1,5 +1,8 @@
 """IntentAgent: parses user travel intent into structured data."""
 
+import re
+from datetime import datetime, timedelta
+
 from app.core.agent import BaseAgent, AgentResult
 from app.core.prompts import prompt_manager
 from app.core.llm import chat_completion
@@ -76,10 +79,57 @@ class IntentAgent(BaseAgent):
             )
         except Exception as e:
             duration_ms = (time.monotonic() - start) * 1000
-            logger.error("intent_agent.failed", error=str(e))
+            logger.warning("intent_agent.fallback", error=str(e))
+            parsed = self._fallback_parse(query)
             return AgentResult(
                 agent_name=self.name,
-                success=False,
-                error=str(e),
+                success=True,
+                output=parsed,
                 duration_ms=duration_ms,
             )
+
+    @staticmethod
+    def _fallback_parse(query: str) -> dict:
+        duration = 3
+        budget = 3000
+        destination = ""
+
+        city_match = re.search(r"去([^，,。.\s]+?)(?:玩|旅游|旅行|出行|度假)", query)
+        if city_match:
+            destination = city_match.group(1)
+        else:
+            for city in ["北京", "上海", "广州", "深圳", "杭州", "成都", "重庆", "西安", "南京", "苏州", "厦门", "青岛", "大理", "丽江", "三亚"]:
+                if city in query:
+                    destination = city
+                    break
+
+        digit_days = re.search(r"(\d+)\s*天", query)
+        if digit_days:
+            duration = max(1, int(digit_days.group(1)))
+        else:
+            cn_days = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7}
+            for word, value in cn_days.items():
+                if f"{word}天" in query:
+                    duration = value
+                    break
+
+        budget_match = re.search(r"预算\s*(\d+)", query)
+        if budget_match:
+            budget = int(budget_match.group(1))
+
+        preference_words = ["自然风光", "美食", "亲子", "文化", "历史", "博物馆", "轻松", "徒步", "购物", "摄影"]
+        preferences = [word for word in preference_words if word in query]
+
+        start = datetime.now().date() + timedelta(days=7)
+        all_dates = ",".join((start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(duration))
+
+        return {
+            "destination": destination or "目的地",
+            "duration": duration,
+            "start_date": start.strftime("%Y-%m-%d"),
+            "all_dates": all_dates,
+            "budget": budget,
+            "preferences": preferences,
+            "extra_requirements": query,
+            "travelers": 1,
+        }

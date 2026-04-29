@@ -20,7 +20,15 @@ async def get_redis() -> aioredis.Redis | None:
     """Get Redis connection, returning None if unavailable."""
     global _redis, _available
     if _redis is not None:
-        return _redis
+        try:
+            await _redis.ping()
+            return _redis
+        except Exception:
+            try:
+                await _redis.aclose()
+            except Exception:
+                pass
+            _redis = None
     if not _available:
         return None
     try:
@@ -37,5 +45,5 @@ async def get_redis() -> aioredis.Redis | None:
 async def close_redis() -> None:
     global _redis
     if _redis:
-        await _redis.close()
+        await _redis.aclose()
         _redis = None

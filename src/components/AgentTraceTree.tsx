@@ -21,7 +21,6 @@ interface TraceNode {
 function buildTraceTree(events: SSERunEvent[]): TraceNode[] {
   const roots: TraceNode[] = [];
   const agentNodes: Map<string, TraceNode> = new Map();
-  const parallelGroups: Map<string, TraceNode[]> = new Map();
 
   for (const event of events) {
     switch (event.type) {
@@ -93,11 +92,6 @@ function buildTraceTree(events: SSERunEvent[]): TraceNode[] {
         break;
       }
 
-      case "tool.completed": {
-        const dur = Number(event.data.duration_ms) || 0;
-        break;
-      }
-
       case "critic.issued": {
         const node: TraceNode = {
           type: "critic",
@@ -144,7 +138,7 @@ const STATUS_COLOR = (node: TraceNode): string => {
   return "text-blue-500 animate-pulse";
 };
 
-function TraceRow({ node, depth = 0 }: { node: TraceNode; depth: number }) {
+function TraceRow({ node, depth = 0 }: { node: TraceNode; depth?: number }) {
   const icon = ICON_MAP[node.type] || "📌";
   const indent = depth * 24;
 

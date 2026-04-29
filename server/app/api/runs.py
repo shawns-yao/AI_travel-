@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
@@ -19,11 +20,11 @@ router = APIRouter(prefix="/api/runs", tags=["runs"])
 async def start_run(req: CreateRunRequest):
     """Create and start a new agent run."""
     try:
-        result = await create_run(query=req.query)
+        result = await create_run(query=req.query, api_settings=req.api_settings)
         return RunResponse(
             run_id=result["run_id"],
             status=result["status"],
-            created_at=None,  # Will be set by DB
+            created_at=datetime.now(timezone.utc),
         )
     except Exception as e:
         logger.error("start_run_failed", error=str(e))

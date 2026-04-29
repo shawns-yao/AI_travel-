@@ -26,10 +26,21 @@ class MemoryManager:
 
     def __init__(self, run_id: uuid.UUID | str, user_id: uuid.UUID | str) -> None:
         self.run_id = uuid.UUID(run_id) if isinstance(run_id, str) else run_id
-        self.user_id = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+        self.user_id = self._normalize_user_id(user_id)
         self.short_term = ShortTermMemory(str(self.run_id))
         self.long_term = LongTermMemoryStore(self.user_id)
         self.run_memory = RunMemory(self.run_id)
+
+    @staticmethod
+    def _normalize_user_id(user_id: uuid.UUID | str) -> uuid.UUID:
+        if isinstance(user_id, uuid.UUID):
+            return user_id
+        aliases = {
+            "anonymous": "00000000-0000-4000-8000-000000000001",
+            "demo": "00000000-0000-4000-8000-000000000001",
+        }
+        normalized = aliases.get(user_id, user_id)
+        return uuid.UUID(normalized)
 
     # ── Run lifecycle ──────────────────────────────────────
 

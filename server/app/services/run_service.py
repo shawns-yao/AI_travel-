@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from app.core.dag import DAGExecutor, DAGPlan, EventEmitter, build_travel_dag
 from app.core.agent import agent_registry
+from app.core.config import settings
 from app.core.logging import get_logger
+from app.db.models import TravelPlan
+from app.db.session import async_session_factory
 from app.memory.manager import MemoryManager
 
 logger = get_logger("run_service")
+
+DEMO_USER_ID = "00000000-0000-4000-8000-000000000001"
 
 # In-memory store for active runs and their event queues
 _active_queues: dict[str, asyncio.Queue] = {}
@@ -23,7 +29,7 @@ def get_queue(run_id: str) -> asyncio.Queue | None:
     return _active_queues.get(run_id)
 
 
-async def create_run(query: str, user_id: str = "anonymous") -> dict[str, Any]:
+async def create_run(query: str, user_id: str = DEMO_USER_ID, api_settings: dict[str, Any] | None = None) -> dict[str, Any]:
     """Create a new run, start execution in background, return immediately."""
     run_id = str(uuid.uuid4())
 
@@ -32,7 +38,7 @@ async def create_run(query: str, user_id: str = "anonymous") -> dict[str, Any]:
     _active_queues[run_id] = queue
 
     # Start execution in background
-    task = asyncio.create_task(_execute_run(run_id, query, user_id, queue))
+    task = asyncio.create_task(_execute_run(run_id, query, user_id, queue, api_settings or {}))
     _active_tasks[run_id] = task
 
     return {"run_id": run_id, "status": "pending"}
@@ -43,9 +49,12 @@ async def _execute_run(
     query: str,
     user_id: str,
     queue: asyncio.Queue,
+    api_settings: dict[str, Any],
 ) -> None:
     """Background task: execute the DAG and push events to the queue."""
     try:
+        _apply_runtime_api_settings(api_settings)
+
         # Initialize memory
         mm = MemoryManager(run_id=run_id, user_id=user_id)
         await mm.init_run(query)
@@ -68,11 +77,16 @@ async def _execute_run(
             max_retries=2,
         )
 
+        def emit_progress(event_type: str, **data: Any) -> None:
+            emitter.emit(event_type, run_id, **data)
+
         # Build context for the first node
         run_context = {
             "query": query,
             "user_id": user_id,
             "run_id": run_id,
+            "api_settings": _redact_api_settings(api_settings),
+            "emit_event": emit_progress,
         }
 
         # Inject context into IntentAgent (root node)
@@ -88,10 +102,17 @@ async def _execute_run(
         result_plan = await executor.execute(plan)
 
         # Build final result
-        output = {}
+        agent_outputs = {}
         for node in result_plan.nodes:
             if node.result and node.result.success:
-                output[node.agent_name] = node.result.output
+                agent_outputs[node.agent_name] = node.result.output
+
+        output = _assemble_travel_plan(agent_outputs)
+        plan_id = await _persist_travel_plan(output, user_id)
+        output["id"] = str(plan_id) if plan_id else run_id
+        output["source_run_id"] = run_id
+        output["created_at"] = datetime.now(timezone.utc).isoformat()
+        await _remember_trip_preferences(mm, output, query)
 
         _run_results[run_id] = {
             "run_id": run_id,
@@ -105,10 +126,10 @@ async def _execute_run(
             "type": "run.completed",
             "run_id": run_id,
             "timestamp": asyncio.get_event_loop().time(),
-            "data": {"result": output},
+            "data": {"result": output, "plan_id": str(plan_id) if plan_id else None},
         })
 
-        await mm.complete_run()
+        await mm.complete_run(plan_id=plan_id)
 
     except Exception as e:
         logger.error("run.execute_failed", run_id=run_id, error=str(e))
@@ -146,6 +167,182 @@ def _push_event(queue: asyncio.Queue, event) -> None:
         })
     except asyncio.QueueFull:
         logger.warning("event_queue_full", run_id=event.run_id)
+
+
+def _clean_text(value: Any) -> str:
+    return "".join(ch for ch in str(value or "").strip() if ch.isprintable())
+
+
+def _http_url(value: str, fallback: str) -> str:
+    raw = _clean_text(value or fallback).rstrip("/")
+    if raw.startswith(("http://", "https://")):
+        return raw
+    return f"https://{raw}"
+
+
+def _apply_runtime_api_settings(api_settings: dict[str, Any]) -> None:
+    if not api_settings:
+        return
+
+    llm_key = _clean_text(api_settings.get("llm_api_key"))
+    llm_provider = _clean_text(api_settings.get("llm_provider"))
+    llm_base_url = _clean_text(api_settings.get("llm_base_url"))
+    llm_model = _clean_text(api_settings.get("llm_model"))
+    qweather_key = _clean_text(api_settings.get("qweather_api_key"))
+    qweather_host = _clean_text(api_settings.get("qweather_host"))
+    amap_service_key = _clean_text(api_settings.get("amap_service_key") or api_settings.get("amap_api_key"))
+
+    if llm_provider:
+        settings.llm_provider = llm_provider
+    if llm_key:
+        settings.llm_api_key = llm_key
+        settings.dashscope_api_key = llm_key
+    if llm_base_url:
+        settings.llm_base_url = llm_base_url
+    if llm_model:
+        settings.chat_model = llm_model
+
+    if qweather_key:
+        settings.qweather_api_key = qweather_key
+    if qweather_host:
+        weather_base = _http_url(qweather_host, "devapi.qweather.com")
+        settings.qweather_weather_base_url = weather_base
+        settings.qweather_geo_base_url = f"{weather_base}/geo"
+
+    if amap_service_key:
+        settings.amap_api_key = amap_service_key
+
+
+def _redact_api_settings(api_settings: dict[str, Any]) -> dict[str, Any]:
+    redacted = dict(api_settings)
+    for key in ("llm_api_key", "qweather_api_key", "amap_api_key", "amap_service_key"):
+        if redacted.get(key):
+            redacted[key] = "***"
+    return redacted
+
+
+def _normalize_daily_plans(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            continue
+        day = dict(item)
+        day["day"] = int(day.get("day") or index)
+        day["date"] = str(day.get("date") or "")
+        day["activities"] = day.get("activities") if isinstance(day.get("activities"), list) else []
+        meals = day.get("meals") if isinstance(day.get("meals"), list) else []
+        dinner = next(
+            (
+                meal
+                for meal in meals
+                if isinstance(meal, dict)
+                and (meal.get("type") == "dinner" or "晚" in str(meal.get("time", "")))
+            ),
+            meals[0] if meals and isinstance(meals[0], dict) else None,
+        )
+        if isinstance(dinner, dict):
+            dinner = dict(dinner)
+            dinner["type"] = "dinner"
+            dinner["time"] = "晚上"
+            day["meals"] = [dinner]
+        else:
+            day["meals"] = []
+        day["notes"] = str(day.get("notes") or "")
+        normalized.append(day)
+    return normalized
+
+
+def _assemble_travel_plan(agent_outputs: dict[str, Any]) -> dict[str, Any]:
+    intent = agent_outputs.get("IntentAgent", {}) or {}
+    weather = agent_outputs.get("WeatherAgent") or None
+    budget = agent_outputs.get("BudgetAgent") or None
+    planner = agent_outputs.get("PlannerAgent", {}) or {}
+    critic = agent_outputs.get("CriticAgent") or None
+    memory = agent_outputs.get("MemoryAgent") or None
+
+    preferences = intent.get("preferences") or []
+    if isinstance(preferences, str):
+        preferences = [p.strip() for p in preferences.split(",") if p.strip()]
+
+    return {
+        "destination": intent.get("destination") or "未知目的地",
+        "duration": int(intent.get("duration") or 3),
+        "start_date": intent.get("start_date") or "",
+        "budget": int(intent.get("budget") or 3000),
+        "preferences": preferences,
+        "weather": weather,
+        "daily_plans": _normalize_daily_plans(planner.get("daily_plans", [])),
+        "map_data": planner.get("map_data"),
+        "budget_breakdown": budget,
+        "critic_report": critic,
+        "memory_context": memory,
+    }
+
+
+async def _persist_travel_plan(plan: dict[str, Any], user_id: str) -> uuid.UUID | None:
+    try:
+        uid = uuid.UUID(user_id)
+        plan_id = uuid.uuid4()
+        async with async_session_factory() as session:
+            row = TravelPlan(
+                id=plan_id,
+                user_id=uid,
+                destination=plan["destination"],
+                duration=plan["duration"],
+                start_date=plan.get("start_date") or None,
+                budget=plan.get("budget"),
+                preferences=plan.get("preferences", []),
+                daily_plans=plan.get("daily_plans", []),
+                map_data=plan.get("map_data"),
+                weather_data=plan.get("weather"),
+                budget_breakdown=plan.get("budget_breakdown"),
+                critic_report=plan.get("critic_report"),
+                memory_context=plan.get("memory_context"),
+                status="generated",
+                version=1,
+            )
+            session.add(row)
+            await session.commit()
+        return plan_id
+    except Exception as e:
+        logger.warning("travel_plan.persist_failed", error=str(e))
+        return None
+
+
+async def _remember_trip_preferences(mm: MemoryManager, plan: dict[str, Any], query: str) -> None:
+    preferences = [str(item) for item in plan.get("preferences", []) if str(item).strip()]
+    destination = plan.get("destination") or "未知目的地"
+    duration = plan.get("duration") or 0
+    budget = plan.get("budget") or 0
+    if not preferences and not query:
+        return
+
+    content = (
+        f"用户曾规划 {destination}{duration}日游，预算约{budget}元；"
+        f"偏好：{('、'.join(preferences) if preferences else '未明确')}；"
+        f"原始需求：{query[:200]}"
+    )
+    embedding = None
+    try:
+        from app.core.llm import get_embedding
+
+        embedding = await get_embedding(content[:1000])
+    except Exception:
+        embedding = None
+
+    try:
+        await mm.remember(
+            content=content,
+            memory_type="preference",
+            embedding=embedding,
+            source="travel_plan",
+            confidence=0.75,
+            metadata={"destination": destination, "duration": duration, "budget": budget},
+        )
+    except Exception as e:
+        logger.warning("travel_plan.memory_write_failed", error=str(e))
 
 
 async def get_run_status(run_id: str) -> dict[str, Any] | None:

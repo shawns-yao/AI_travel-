@@ -9,6 +9,7 @@ from app.agents.intent_agent import IntentAgent
 from app.agents.memory_agent import MemoryAgent
 from app.agents.weather_agent import WeatherAgent
 from app.agents.budget_agent import BudgetAgent
+from app.agents.planner_agent import PlannerAgent
 from app.agents.critic_agent import CriticAgent
 
 
@@ -39,6 +40,14 @@ class TestAgentProperties:
     def test_critic_agent_properties(self):
         agent = CriticAgent()
         assert agent.name == "CriticAgent"
+        assert "PlannerAgent" in agent.dependencies
+        assert "BudgetAgent" in agent.dependencies
+
+    def test_planner_agent_properties(self):
+        agent = PlannerAgent()
+        assert agent.name == "PlannerAgent"
+        assert "IntentAgent" in agent.dependencies
+        assert "WeatherAgent" in agent.dependencies
         assert "BudgetAgent" in agent.dependencies
 
     def test_all_agents_have_prompts(self):
@@ -50,7 +59,7 @@ class TestAgentProperties:
             pm = type(prompt_manager).__call__
             # Reload prompts
             pm2 = type(prompt_manager)(str(prompts_dir))
-            for name in ["IntentAgent", "MemoryAgent", "WeatherAgent", "BudgetAgent", "CriticAgent"]:
+            for name in ["IntentAgent", "MemoryAgent", "WeatherAgent", "BudgetAgent", "PlannerAgent", "CriticAgent"]:
                 t = pm2.get(name)
                 assert t.system_prompt, f"{name} has no system prompt"
                 assert t.version, f"{name} has no version"
@@ -97,6 +106,7 @@ class TestCriticAgentExecution:
         result = await agent.execute({
             "IntentAgent": {"destination": "Beijing", "duration": 3, "budget": 3000, "preferences": ["culture"]},
             "BudgetAgent": {"total_budget": 3000, "allocated": {"transport": 600, "accommodation": 1050, "meals": 600, "attractions": 360, "shopping": 90, "contingency": 300}},
+            "PlannerAgent": {"daily_plans": [{"day": 1, "activities": [], "meals": [], "notes": ""}]},
             "WeatherAgent": {"forecast": [{"date": "2026-05-01", "condition": "sunny", "risk_level": "LOW"}]},
             "MemoryAgent": {"long_term": []},
             "run_id": str(uuid.uuid4()),
@@ -115,20 +125,23 @@ class TestCriticAgentExecution:
 # ── Registry integration ───────────────────────────────────
 
 class TestAgentRegistration:
-    def test_all_five_agents_registered(self):
-        """After importing agents.__init__, all 5 should be in registry."""
+    def test_all_core_agents_registered(self):
+        """After importing agents.__init__, all core agents should be in registry."""
         # Re-import to ensure registration
         import app.agents  # noqa: F401
         names = agent_registry.list_names()
-        for name in ["IntentAgent", "MemoryAgent", "WeatherAgent", "BudgetAgent", "CriticAgent"]:
+        for name in ["IntentAgent", "MemoryAgent", "WeatherAgent", "BudgetAgent", "PlannerAgent", "CriticAgent"]:
             assert name in names, f"{name} not registered"
 
     def test_agent_dag_ready(self):
         """Verify dependency chain is correct for standard DAG."""
         intent = agent_registry.get("IntentAgent")
         memory = agent_registry.get("MemoryAgent")
+        planner = agent_registry.get("PlannerAgent")
         critic = agent_registry.get("CriticAgent")
 
         assert intent.dependencies == []
         assert "IntentAgent" in memory.dependencies
+        assert "BudgetAgent" in planner.dependencies
+        assert "PlannerAgent" in critic.dependencies
         assert "BudgetAgent" in critic.dependencies

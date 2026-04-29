@@ -27,6 +27,49 @@ logger = get_logger("dag")
 
 # ── Types ──────────────────────────────────────────────────
 
+def _compact_agent_output(agent_name: str, output: Any) -> dict[str, Any] | None:
+    if not isinstance(output, dict):
+        return None
+
+    if agent_name == "BudgetAgent":
+        return {
+            "total_budget": output.get("total_budget"),
+            "allocated": output.get("allocated", {}),
+            "warnings": output.get("warnings", []),
+        }
+
+    if agent_name == "PlannerAgent":
+        map_data = output.get("map_data") if isinstance(output.get("map_data"), dict) else {}
+        daily_plans = output.get("daily_plans") if isinstance(output.get("daily_plans"), list) else []
+        first_day = daily_plans[0] if daily_plans and isinstance(daily_plans[0], dict) else {}
+        return {
+            "hotels": (map_data.get("hotels") or [])[:3],
+            "routes": (map_data.get("routes") or [])[:3],
+            "daily_plans": [
+                {
+                    "day": first_day.get("day"),
+                    "activities": (first_day.get("activities") or [])[:3],
+                    "meals": (first_day.get("meals") or [])[:2],
+                }
+            ] if first_day else [],
+        }
+
+    if agent_name == "WeatherAgent":
+        return {
+            "forecast": (output.get("forecast") or [])[:3],
+            "risk_analysis": output.get("risk_analysis", ""),
+        }
+
+    if agent_name == "IntentAgent":
+        return {
+            "destination": output.get("destination"),
+            "duration": output.get("duration"),
+            "budget": output.get("budget"),
+            "travelers": output.get("travelers"),
+        }
+
+    return None
+
 class NodeStatus(str, Enum):
     PENDING = "pending"
     READY = "ready"
@@ -207,7 +250,10 @@ class DAGExecutor:
                 return plan
 
         # Check if CriticAgent requests replan
-        critic_node = plan.get_node("CriticAgent")
+        critic_node = plan.get_node("CriticAgent") or next(
+            (node for node in plan.nodes if node.agent_name == "CriticAgent"),
+            None,
+        )
         if critic_node and critic_node.status == NodeStatus.COMPLETED and critic_node.result:
             critic_output = critic_node.result.output
             if isinstance(critic_output, dict) and critic_output.get("needs_replan"):
@@ -229,7 +275,7 @@ class DAGExecutor:
                     )
 
         self.emitter.emit(
-            "run.completed",
+            "dag.completed",
             plan.run_id,
             completed_agents=[n.agent_name for n in plan.nodes if n.status == NodeStatus.COMPLETED],
             failed_agents=[n.agent_name for n in plan.nodes if n.status == NodeStatus.FAILED],
@@ -238,7 +284,21 @@ class DAGExecutor:
 
     async def _execute_node(self, node: DAGNode, plan: DAGPlan) -> None:
         """Execute a single agent node with timeout, retry, and event emission."""
-        agent = self.registry.get(node.agent_name)
+        try:
+            agent = self.registry.get(node.agent_name)
+        except AgentNotFoundError as e:
+            node.status = NodeStatus.FAILED
+            node.completed_at = time.time()
+            node.result = AgentResult(agent_name=node.agent_name, success=False, error=str(e))
+            self.emitter.emit(
+                "agent.completed",
+                plan.run_id,
+                agent_name=node.agent_name,
+                node_id=node.node_id,
+                success=False,
+                error=str(e),
+            )
+            return
 
         node.status = NodeStatus.RUNNING
         node.started_at = time.time()
@@ -275,6 +335,7 @@ class DAGExecutor:
                         success=True,
                         duration_ms=round(node.duration_ms, 2),
                         summary=str(result.output)[:200] if result.output else "",
+                        output=_compact_agent_output(node.agent_name, result.output),
                     )
                 else:
                     if attempt < self.max_retries:
@@ -335,9 +396,18 @@ class DAGExecutor:
 
     def _compute_waves(self, nodes: list[DAGNode]) -> list[list[DAGNode]]:
         """Topological sort grouping independent nodes into parallel waves."""
+        node_ids = {n.node_id for n in nodes}
+        for node in nodes:
+            missing = [dep for dep in node.dependencies if dep not in node_ids]
+            if missing:
+                raise DAGExecutionError(
+                    f"Node '{node.node_id}' has missing dependencies: {missing}"
+                )
+
         # Build adjacency and in-degree
         in_degree: dict[str, int] = {n.node_id: len(n.dependencies) for n in nodes}
         dependents: dict[str, list[str]] = defaultdict(list)
+        node_by_id = {n.node_id: n for n in nodes}
         for n in nodes:
             for dep in n.dependencies:
                 dependents[dep].append(n.node_id)
@@ -353,7 +423,7 @@ class DAGExecutor:
 
             # This node's wave is max(dependency wave) + 1 (or 0 if no deps)
             actual_wave = 0
-            for dep in next((n for n in nodes if n.node_id == node_id), None).dependencies or []:  # type: ignore[union-attr]
+            for dep in node_by_id[node_id].dependencies:
                 actual_wave = max(actual_wave, wave_map.get(dep, 0) + 1)
             wave_map[node_id] = actual_wave
             max_wave = max(max_wave, actual_wave)
@@ -362,6 +432,12 @@ class DAGExecutor:
                 in_degree[dep_id] -= 1
                 if in_degree[dep_id] == 0:
                     queue.append(dep_id)
+
+        unresolved = [node_id for node_id in in_degree if node_id not in wave_map]
+        if unresolved:
+            raise DAGExecutionError(
+                f"DAG contains a cycle or unresolved dependencies: {unresolved}"
+            )
 
         # Group by wave
         waves: list[list[DAGNode]] = [[] for _ in range(max_wave + 1)]
@@ -401,6 +477,7 @@ def build_travel_dag(
             "MemoryAgent",
             "WeatherAgent",
             "BudgetAgent",
+            "PlannerAgent",
             "CriticAgent",
         ]
 
@@ -440,11 +517,27 @@ def build_travel_dag(
         nodes.append(n)
         node_map["ItineraryOptimizerAgent"] = n
 
-    # CriticAgent: depends on BudgetAgent (or ItineraryOptimizer)
+    # PlannerAgent: depends on BudgetAgent and available context
+    if "PlannerAgent" in agent_names:
+        deps = [name for name in ["IntentAgent", "BudgetAgent", "WeatherAgent", "MemoryAgent"] if name in node_map]
+        n = DAGNode(
+            agent_name="PlannerAgent",
+            node_id="PlannerAgent",
+            dependencies=deps if deps else ["IntentAgent"],
+            required=True,
+        )
+        nodes.append(n)
+        node_map["PlannerAgent"] = n
+
+    # CriticAgent: depends on PlannerAgent, BudgetAgent (or ItineraryOptimizer)
     if "CriticAgent" in agent_names:
         deps = []
         if "ItineraryOptimizerAgent" in node_map:
             deps.append("ItineraryOptimizerAgent")
+        elif "PlannerAgent" in node_map:
+            deps.extend(["PlannerAgent"])
+            if "BudgetAgent" in node_map:
+                deps.append("BudgetAgent")
         elif "BudgetAgent" in node_map:
             deps.append("BudgetAgent")
         n = DAGNode(agent_name="CriticAgent", node_id="CriticAgent",

@@ -2,6 +2,7 @@ import pytest
 
 from app.core.tool import ToolRegistry, BaseTool, ToolResult, tool_registry
 from app.core.exceptions import ToolNotFoundError
+from app.tools.amap_tool import AmapGeocodeTool, AmapPOISearchTool, AmapRoutePlanningTool
 
 
 # ── Test tool implementations ───────────────────────────────
@@ -129,3 +130,29 @@ class TestToolRegistry:
         tool = MockWeatherTool()
         result = await tool.run(location="Beijing", date="2026-05-01", extra="ignored")
         assert result.success is True
+
+
+class TestAmapTools:
+    def test_amap_tool_schemas(self):
+        assert AmapGeocodeTool().schema.name == "amap_geocode"
+        assert AmapPOISearchTool().schema.name == "amap_search_poi"
+        assert AmapRoutePlanningTool().schema.name == "amap_route_planning"
+
+    async def test_amap_tools_fallback_without_key(self, monkeypatch):
+        monkeypatch.setattr("app.core.config.settings.amap_api_key", "")
+
+        geocode = await AmapGeocodeTool().execute(address="成都")
+        assert geocode["location"]["lng"] > 0
+
+        pois = await AmapPOISearchTool().execute(keywords="景点", city="成都", limit=3)
+        assert len(pois) == 3
+        assert pois[0]["source"] in {"fallback", "amap"}
+
+        route = await AmapRoutePlanningTool().execute(
+            origin="104.0665,30.5728",
+            destination="104.0725,30.5768",
+            mode="walking",
+            city="成都",
+        )
+        assert route["distance_m"] > 0
+        assert route["duration_min"] > 0

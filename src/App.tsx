@@ -1,99 +1,172 @@
-import { useCallback, useState } from "react";
-import { Card } from "./components/ui/card";
-import { useStore } from "./model";
-import PlannerForm from "./components/PlannerForm";
-import AgentStatus from "./components/AgentStatus";
-import AgentTraceTree from "./components/AgentTraceTree";
-import PlanResult from "./components/PlanResult";
+import { useCallback, useEffect, useState } from "react";
+import { AppShell, AppView } from "@/layout/AppShell";
+import { useTravelRun } from "@/hooks/useTravelRun";
+import { useStore } from "@/model";
+import { deleteSavedPlan, fetchSavedPlans } from "@/services/travelApi";
+import { HomePage } from "@/pages/HomePage";
+import { GeneratingPage } from "@/pages/GeneratingPage";
+import { ResultPage } from "@/pages/ResultPage";
+import { PlansPage } from "@/pages/PlansPage";
+import { PreferencesPage } from "@/pages/PreferencesPage";
+import { ComparePage, PlanningDraft } from "@/pages/ComparePage";
+import { DestinationPreset, ExplorePage } from "@/pages/ExplorePage";
+import { EditPlanPage } from "@/pages/EditPlanPage";
 
 function App() {
+  const [view, setView] = useState<AppView>("home");
+  const [query, setQuery] = useState("我想去杭州玩三天，预算4000元，父母同行，轻松少走路");
+  const [planningDraft, setPlanningDraft] = useState<PlanningDraft>({
+    destination: "杭州",
+    duration: "3",
+    startDate: "",
+    people: "3",
+    budget: "4000",
+    notes: "父母同行，轻松少走路",
+  });
   const isRunning = useStore((s) => s.isRunning);
   const travelPlan = useStore((s) => s.travelPlan);
+  const savedPlans = useStore((s) => s.savedPlans);
   const events = useStore((s) => s.events);
-  const setIsRunning = useStore((s) => s.setIsRunning);
   const setTravelPlan = useStore((s) => s.setTravelPlan);
-  const setRunId = useStore((s) => s.setRunId);
-  const addEvent = useStore((s) => s.addEvent);
-  const reset = useStore((s) => s.reset);
+  const saveTravelPlan = useStore((s) => s.saveTravelPlan);
+  const mergeSavedPlans = useStore((s) => s.mergeSavedPlans);
+  const removeTravelPlan = useStore((s) => s.removeTravelPlan);
+  const { startRun } = useTravelRun();
 
-  const [showReport, setShowReport] = useState(false);
+  useEffect(() => {
+    fetchSavedPlans()
+      .then((plans) => mergeSavedPlans(plans))
+      .catch(() => undefined);
+  }, [mergeSavedPlans]);
 
-  const handleSubmit = useCallback(async (input: string) => {
-    reset();
-    setIsRunning(true);
-    setShowReport(false);
+  const handleSubmit = useCallback((queryOverride?: string) => {
+    const nextQuery = queryOverride?.trim() || query.trim();
+    if (!nextQuery) return;
+    setQuery(nextQuery);
+    setView("generating");
+    void startRun(nextQuery);
+  }, [query, startRun]);
 
-    try {
-      const response = await fetch("/api/runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: input }),
-      });
+  const handlePlanQuery = useCallback(
+    (nextQuery: string) => {
+      if (!nextQuery.trim()) return;
+      setQuery(nextQuery);
+      setView("generating");
+      void startRun(nextQuery);
+    },
+    [startRun],
+  );
 
-      if (!response.ok) throw new Error("Failed to create run");
+  const handleOpenPlan = useCallback(
+    (plan: typeof travelPlan) => {
+      if (!plan) return;
+      setTravelPlan(plan);
+      setView("result");
+    },
+    [setTravelPlan],
+  );
 
-      const { run_id } = await response.json();
-      setRunId(run_id);
+  const buildVariantQuery = useCallback((variant: string, draft: PlanningDraft) => {
+    const variantRules =
+      variant === "舒适版"
+        ? "少走路，住宿靠近核心区域，每天2到3个景点，节奏轻松"
+        : variant === "省钱版"
+          ? "公共交通优先，住宿选地铁沿线，免费或低价景点优先，本地平价美食"
+          : "小众路线，文化体验，每天4到5个地点，行程更紧凑";
 
-      // Connect SSE stream
-      const eventSource = new EventSource(`/api/runs/${run_id}/events`);
+    return [
+      `请按${variant}生成旅行方案`,
+      `目的地：${draft.destination || "杭州"}`,
+      `天数：${draft.duration || "3"}天`,
+      draft.startDate ? `出发日期：${draft.startDate}` : "",
+      `人数：${draft.people || "2"}人`,
+      `预算：${draft.budget || "4000"}元`,
+      `方案约束：${variantRules}`,
+      draft.notes ? `补充要求：${draft.notes}` : "",
+    ].filter(Boolean).join("，");
+  }, []);
 
-      eventSource.onmessage = (event) => {
-        const parsed = JSON.parse(event.data);
-        addEvent(parsed);
+  const handleGenerateVariant = useCallback(
+    (variant: string, draft: PlanningDraft) => {
+      handlePlanQuery(buildVariantQuery(variant, draft));
+    },
+    [buildVariantQuery, handlePlanQuery],
+  );
 
-        if (parsed.type === "run.completed") {
-          setTravelPlan(parsed.data.result);
-          setIsRunning(false);
-          eventSource.close();
-        } else if (parsed.type === "run.failed") {
-          setIsRunning(false);
-          eventSource.close();
-        }
-      };
+  const handleChooseDestination = useCallback((destination: DestinationPreset) => {
+    setPlanningDraft((current) => ({
+      ...current,
+      destination: destination.city,
+      duration: destination.days.replace(/\D/g, "") || current.duration,
+      people: destination.people.replace(/\D/g, "") || current.people,
+      budget: destination.budget.replace(/[¥,]/g, ""),
+      notes: destination.tags.join("，"),
+    }));
+    setView("compare");
+  }, []);
 
-      eventSource.onerror = () => {
-        setIsRunning(false);
-        eventSource.close();
-      };
-    } catch (error) {
-      console.error("Run failed:", error);
-      setIsRunning(false);
+  const handleDeletePlan = useCallback(
+    async (plan: typeof travelPlan) => {
+      if (!plan) return;
+      if (plan.id) {
+        await deleteSavedPlan(plan.id);
+      }
+      removeTravelPlan(plan);
+    },
+    [removeTravelPlan],
+  );
+
+  useEffect(() => {
+    if (view === "generating" && travelPlan && !isRunning) {
+      setView("result");
     }
-  }, [reset, setIsRunning, setShowReport, setRunId, addEvent, setTravelPlan]);
+  }, [isRunning, travelPlan, view]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      <div className="container mx-auto px-4 py-8 max-w-6xl">
-        <div className="mb-8">
-          <Card className="p-4 shadow-lg border-0 bg-white/80 backdrop-blur-sm">
-            <PlannerForm
-              onSubmit={handleSubmit}
-              isLoading={isRunning}
-              onShowReport={() => setShowReport(true)}
-              hasReport={!!travelPlan}
-            />
-          </Card>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <Card className="p-6 shadow-lg border-0 bg-white/80 backdrop-blur-sm min-h-[400px]">
-            <AgentTraceTree events={events} isRunning={isRunning} />
-          </Card>
-          <Card className="p-6 shadow-lg border-0 bg-white/80 backdrop-blur-sm min-h-[400px]">
-            <AgentStatus isPlanning={isRunning} events={events} />
-          </Card>
-        </div>
-
-        {showReport && travelPlan && (
-          <PlanResult
-            plan={travelPlan}
-            open={showReport}
-            onOpenChange={setShowReport}
-          />
-        )}
-      </div>
-    </div>
+    <AppShell activeView={view} onNavigate={setView}>
+      {view === "home" && (
+        <HomePage
+          query={query}
+          isRunning={isRunning}
+          onQueryChange={setQuery}
+          onSubmit={handleSubmit}
+          onQuickPlan={handlePlanQuery}
+        />
+      )}
+      {view === "generating" && <GeneratingPage events={events} query={query} />}
+      {view === "result" && travelPlan && (
+        <ResultPage plan={travelPlan} onSave={saveTravelPlan} onDuplicate={handlePlanQuery} />
+      )}
+      {view === "edit" && travelPlan && (
+        <EditPlanPage plan={travelPlan} onSave={saveTravelPlan} onOptimize={handlePlanQuery} />
+      )}
+      {view === "plans" && (
+        <PlansPage
+          plans={savedPlans}
+          onNew={() => setView("home")}
+          onOpenPlan={(plan) => {
+            handleOpenPlan(plan);
+            setView("edit");
+          }}
+          onDuplicate={(plan) =>
+            handlePlanQuery(`我想重新规划${plan.destination}${plan.duration}日游，预算${plan.budget}元，保留当前偏好并优化路线`)
+          }
+          onDelete={handleDeletePlan}
+        />
+      )}
+      {view === "preferences" && <PreferencesPage />}
+      {view === "explore" && <ExplorePage onChooseDestination={handleChooseDestination} />}
+      {view === "compare" && (
+        <ComparePage
+          plan={travelPlan}
+          draft={planningDraft}
+          onDraftChange={setPlanningDraft}
+          onBack={() => setView("home")}
+          onSaveDraft={travelPlan ? () => saveTravelPlan(travelPlan) : undefined}
+          onGenerateVariant={handleGenerateVariant}
+        />
+      )}
+    </AppShell>
   );
 }
 

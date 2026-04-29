@@ -39,6 +39,7 @@ class TravelPlan(Base):
     budget: Mapped[int] = mapped_column(Integer, nullable=True)
     preferences: Mapped[dict] = mapped_column(JSONB, default=list)
     daily_plans: Mapped[dict] = mapped_column(JSONB, default=list)
+    map_data: Mapped[dict] = mapped_column(JSONB, default=None, nullable=True)
     weather_data: Mapped[dict] = mapped_column(JSONB, default=None, nullable=True)
     budget_breakdown: Mapped[dict] = mapped_column(JSONB, default=None, nullable=True)
     critic_report: Mapped[dict] = mapped_column(JSONB, default=None, nullable=True)
@@ -121,6 +122,24 @@ class KnowledgeChunk(Base):
     source_file: Mapped[str] = mapped_column(String(255), nullable=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ExternalAPICache(Base):
+    """Persistent cache for normalized external information such as weather and POI."""
+
+    __tablename__ = "external_api_cache"
+    __table_args__ = (
+        Index("idx_external_api_cache_namespace", "namespace"),
+        Index("idx_external_api_cache_expires_at", "expires_at"),
+        {"schema": "travel"},
+    )
+
+    cache_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    namespace: Mapped[str] = mapped_column(String(80), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class TokenUsage(Base):

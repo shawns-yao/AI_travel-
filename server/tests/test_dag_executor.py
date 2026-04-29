@@ -85,6 +85,13 @@ class CriticReplanAgent(BaseAgent):
         )
 
 
+# Backwards-compatible aliases used by older tests.
+FastSuccess = FastSuccessAgent
+DelayedSuccess = DelayedSuccessAgent
+Failing = FailingAgent
+ContextEcho = ContextEchoAgent
+
+
 # ── Helpers ────────────────────────────────────────────────
 
 def make_plan(run_id: str = "test-run-1", nodes: list[DAGNode] | None = None) -> DAGPlan:
@@ -314,12 +321,12 @@ class TestEventEmission:
         assert "plan.generated" in event_types
         assert "step.started" in event_types
         assert "agent.completed" in event_types
-        assert "run.completed" in event_types
+        assert "dag.completed" in event_types
 
         # Run.created must be first
         assert emitter.events[0].type == "run.created"
         # Run.completed must be last (or run.failed)
-        assert emitter.events[-1].type in ("run.completed", "run.failed")
+        assert emitter.events[-1].type in ("dag.completed", "run.failed")
 
     async def test_failure_event(self):
         nodes = [
@@ -363,7 +370,7 @@ class TestBuildTravelDAG:
         critic = plan.get_node("CriticAgent")
         # Critic depends on BudgetAgent (or ItineraryOptimizer)
         deps = critic.dependencies
-        assert any(d in deps for d in ["BudgetAgent", "ItineraryOptimizerAgent"])
+        assert any(d in deps for d in ["BudgetAgent", "ItineraryOptimizerAgent", "PlannerAgent"])
 
     def test_parallel_agents_depend_on_intent(self):
         plan = build_travel_dag("test-run",

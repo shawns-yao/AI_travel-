@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import select, update
 
 from app.core.logging import get_logger
-from app.db.models import AgentRun
+from app.db.models import AgentRun, User
 from app.db.session import async_session_factory
 
 logger = get_logger("run_memory")
@@ -32,6 +32,15 @@ class RunMemory:
     async def create_run(self, user_id: uuid.UUID, query: str, run_id: uuid.UUID | None = None) -> uuid.UUID:
         rid = run_id or uuid.uuid4()
         async with async_session_factory() as session:
+            user = await session.get(User, user_id)
+            if user is None:
+                user = User(
+                    id=user_id,
+                    email=f"{user_id}@demo.local",
+                    hashed_password="demo",
+                    display_name="Demo User",
+                )
+                session.add(user)
             run = AgentRun(
                 id=rid,
                 user_id=user_id,

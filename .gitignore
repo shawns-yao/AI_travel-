@@ -25,6 +25,8 @@ dist-ssr
 
 # Environment variables
 .env
+.env.*
+!.env.example
 .env.local
 .env.development.local
 .env.test.local
@@ -65,6 +67,9 @@ Thumbs.db
 *.swp
 *.swo 
 .ace-tool/
+.claude/
+.codex-backend.*.log
+vite.*.log
 
 # Python
 __pycache__/
@@ -78,5 +83,7 @@ venv/
 
 # Server
 server/.env
+server/.env.*
+!server/.env.example
 *.db
 *.sqlite3

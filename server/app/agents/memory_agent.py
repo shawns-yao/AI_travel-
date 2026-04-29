@@ -59,6 +59,19 @@ class MemoryAgent(BaseAgent):
 
             log_memory_hit(logger, "short_term", len(short_term), run_id)
             log_memory_hit(logger, "long_term", len(long_term), run_id)
+            emit_event = context.get("emit_event")
+            if callable(emit_event):
+                emit_event(
+                    "memory.hit",
+                    agent_name=self.name,
+                    short_term_count=len(short_term),
+                    long_term_count=len(long_term),
+                    summary=f"命中短期记忆 {len(short_term)} 条，长期记忆 {len(long_term)} 条",
+                    output={
+                        "short_term": short_term[:3],
+                        "long_term": long_term[:3],
+                    },
+                )
 
             # Use LLM to summarize memory findings
             template = prompt_manager.get("MemoryAgent")
@@ -76,12 +89,21 @@ class MemoryAgent(BaseAgent):
                 context_str = f"\n\n## Retrieved Memory Context\nShort-term: {short_term}\nLong-term: {long_term}"
                 messages[-1]["content"] += context_str
 
-            response = await chat_completion(messages=messages, temperature=0.3)
-            parsed = safe_json_parse(response.get("content", ""), {
+            fallback = {
                 "short_term": short_term,
                 "long_term": long_term,
-                "summary": "No prior memory found for this user.",
-            })
+                "summary": (
+                    f"命中短期记忆 {len(short_term)} 条，长期记忆 {len(long_term)} 条。"
+                    if short_term or long_term
+                    else "暂无可复用记忆。"
+                ),
+            }
+            try:
+                response = await chat_completion(messages=messages, temperature=0.3)
+                parsed = safe_json_parse(response.get("content", ""), fallback)
+            except Exception as e:
+                logger.warning("memory_agent.summary_fallback", error=str(e))
+                parsed = fallback
 
             duration_ms = (time.monotonic() - start) * 1000
             log_agent_done(logger, self.name, run_id, duration_ms,
@@ -100,10 +122,10 @@ class MemoryAgent(BaseAgent):
             )
         except Exception as e:
             duration_ms = (time.monotonic() - start) * 1000
-            logger.error("memory_agent.failed", error=str(e))
+            logger.warning("memory_agent.failed_with_empty_context", error=str(e))
             return AgentResult(
                 agent_name=self.name,
-                success=False,
-                error=str(e),
+                success=True,
+                output={"short_term": [], "long_term": [], "summary": "记忆检索暂不可用。"},
                 duration_ms=duration_ms,
             )

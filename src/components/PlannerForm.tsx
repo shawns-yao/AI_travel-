@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { Eye, Loader2, Sparkles } from "lucide-react";
 
 interface PlannerFormProps {
   onSubmit: (input: string) => void;
@@ -26,23 +26,14 @@ export default function PlannerForm({
 
   return (
     <div className="w-full">
-      <CardHeader className="text-center p-2 pb-6">
-        <CardTitle className="text-2xl font-bold text-gray-900">
-          AI Travel Agent Platform
-        </CardTitle>
-        <p className="text-sm text-gray-500 mt-1">
-          Multi-Agent Intelligent Travel Decision System
-        </p>
-      </CardHeader>
-
       <form onSubmit={handleSubmit} className="space-y-2">
-        <div className="flex gap-4 items-end">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
           <div className="flex-1">
             <Input
-              placeholder="Describe your travel plan..."
+              placeholder="输入目的地、天数、预算和偏好"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              className="min-h-10 text-sm"
+              className="h-11 text-sm"
               disabled={isLoading}
             />
           </div>
@@ -54,11 +45,14 @@ export default function PlannerForm({
           >
             {isLoading ? (
               <>
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2" />
-                Agents Working...
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                规划中
               </>
             ) : (
-              "Start Planning"
+              <>
+                <Sparkles className="mr-2 h-4 w-4" />
+                开始规划
+              </>
             )}
           </Button>
           <Button
@@ -69,7 +63,8 @@ export default function PlannerForm({
             size="sm"
             disabled={!hasReport}
           >
-            View Report
+            <Eye className="mr-2 h-4 w-4" />
+            查看方案
           </Button>
         </div>
       </form>

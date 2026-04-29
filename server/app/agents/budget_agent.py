@@ -48,20 +48,7 @@ class BudgetAgent(BaseAgent):
             ]
 
             response = await chat_completion(messages=messages, temperature=0.3)
-            parsed = safe_json_parse(response.get("content", ""), {
-                "total_budget": total_budget,
-                "allocated": {
-                    "transport": int(total_budget * 0.25),
-                    "accommodation": int(total_budget * 0.35),
-                    "meals": int(total_budget * 0.20),
-                    "attractions": int(total_budget * 0.12),
-                    "shopping": int(total_budget * 0.03),
-                    "contingency": int(total_budget * 0.05),
-                },
-                "spent": 0,
-                "warnings": [],
-                "suggestions": [],
-            })
+            parsed = safe_json_parse(response.get("content", ""), self._fallback_budget(total_budget))
 
             # Validate allocations don't exceed budget
             allocated_total = sum(parsed.get("allocated", {}).values())
@@ -83,10 +70,29 @@ class BudgetAgent(BaseAgent):
             )
         except Exception as e:
             duration_ms = (time.monotonic() - start) * 1000
-            logger.error("budget_agent.failed", error=str(e))
+            logger.warning("budget_agent.fallback", error=str(e))
+            intent = context.get("IntentAgent", {})
+            total_budget = int(intent.get("budget", 3000) or 3000)
             return AgentResult(
                 agent_name=self.name,
-                success=False,
-                error=str(e),
+                success=True,
+                output=self._fallback_budget(total_budget),
                 duration_ms=duration_ms,
             )
+
+    @staticmethod
+    def _fallback_budget(total_budget: int) -> dict:
+        return {
+            "total_budget": total_budget,
+            "allocated": {
+                "transport": int(total_budget * 0.25),
+                "accommodation": int(total_budget * 0.35),
+                "meals": int(total_budget * 0.20),
+                "attractions": int(total_budget * 0.12),
+                "shopping": int(total_budget * 0.03),
+                "contingency": int(total_budget * 0.05),
+            },
+            "spent": 0,
+            "warnings": [],
+            "suggestions": ["当前为预算兜底估算，接入模型后可细化到每个行程节点。"],
+        }

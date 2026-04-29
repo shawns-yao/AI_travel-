@@ -32,6 +32,11 @@ export interface RunStatus {
 
 // Travel plan result
 export interface TravelPlanResult {
+  id?: string;
+  source_run_id?: string;
+  created_at?: string;
+  updated_at?: string;
+  status?: string;
   destination: string;
   duration: number;
   start_date: string;
@@ -39,6 +44,7 @@ export interface TravelPlanResult {
   preferences: string[];
   weather: WeatherResult | null;
   daily_plans: DailyPlan[];
+  map_data: MapData | null;
   budget_breakdown: BudgetBreakdown | null;
   critic_report: CriticReport | null;
   memory_context: MemoryContext | null;
@@ -56,6 +62,8 @@ export interface DailyWeather {
   temp_low: number;
   humidity: number;
   recommendation: string;
+  risk_level?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  source?: "qweather" | "fallback";
 }
 
 export interface DailyPlan {
@@ -76,6 +84,7 @@ export interface Activity {
   time: string;
   cost: number;
   source?: string; // RAG citation
+  coordinate?: Coordinate | null;
 }
 
 export interface Meal {
@@ -86,6 +95,49 @@ export interface Meal {
   location: string;
   time: string;
   cost: number;
+  source?: string;
+  coordinate?: Coordinate | null;
+}
+
+export interface Coordinate {
+  lng: number;
+  lat: number;
+}
+
+export interface MapData {
+  destination: string;
+  center: {
+    formatted_address?: string;
+    city?: string;
+    location?: Coordinate;
+    source?: string;
+  } | null;
+  attractions: POI[];
+  food: POI[];
+  hotels: POI[];
+  routes: RouteSummary[];
+}
+
+export interface POI {
+  id: string;
+  name: string;
+  type: string;
+  address: string;
+  location: Coordinate | null;
+  rating?: string;
+  cost?: string;
+  photo?: string;
+  source?: string;
+}
+
+export interface RouteSummary {
+  from: string;
+  to: string;
+  mode: "walking" | "driving" | "bicycling";
+  distance_m: number;
+  duration_min: number;
+  strategy?: string;
+  source?: string;
 }
 
 export interface BudgetBreakdown {

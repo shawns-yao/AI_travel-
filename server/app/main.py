@@ -19,11 +19,19 @@ async def lifespan(app: FastAPI):
     import app.tools  # noqa: F401
     import app.agents  # noqa: F401
 
+    # Import models before create_all so SQLAlchemy metadata is populated.
+    import app.db.models  # noqa: F401
     from app.db.session import engine
     from app.db.base import Base
+    from sqlalchemy import text
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("ALTER TABLE travel.travel_plans ADD COLUMN IF NOT EXISTS map_data JSONB"))
+        await conn.execute(text("ALTER TABLE travel.travel_plans ADD COLUMN IF NOT EXISTS weather_data JSONB"))
+        await conn.execute(text("ALTER TABLE travel.travel_plans ADD COLUMN IF NOT EXISTS budget_breakdown JSONB"))
+        await conn.execute(text("ALTER TABLE travel.travel_plans ADD COLUMN IF NOT EXISTS critic_report JSONB"))
+        await conn.execute(text("ALTER TABLE travel.travel_plans ADD COLUMN IF NOT EXISTS memory_context JSONB"))
 
     yield
 
@@ -42,14 +50,23 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Register API routers
+from app.api.config import router as config_router
+from app.api.plans import router as plans_router
 from app.api.runs import router as runs_router
+app.include_router(config_router)
+app.include_router(plans_router)
 app.include_router(runs_router)
 
 

@@ -32,14 +32,21 @@ class ShortTermMemory:
         r = await get_redis()
         if r is None:
             return
-        await r.set(self.context_key, json.dumps(data, default=str), ex=DEFAULT_TTL)
+        try:
+            await r.set(self.context_key, json.dumps(data, default=str), ex=DEFAULT_TTL)
+        except Exception:
+            logger.warning("short_term.set_context_failed", run_id=self.run_id)
 
     async def get_context(self) -> dict[str, Any]:
         r = await get_redis()
         if r is None:
             return {}
-        raw = await r.get(self.context_key)
-        return json.loads(raw) if raw else {}
+        try:
+            raw = await r.get(self.context_key)
+            return json.loads(raw) if raw else {}
+        except Exception:
+            logger.warning("short_term.get_context_failed", run_id=self.run_id)
+            return {}
 
     async def update_context(self, updates: dict[str, Any]) -> None:
         current = await self.get_context()
@@ -51,15 +58,22 @@ class ShortTermMemory:
         if r is None:
             return
         msg = json.dumps({"role": role, "content": content})
-        await r.rpush(self.messages_key, msg)
-        await r.expire(self.messages_key, DEFAULT_TTL)
+        try:
+            await r.rpush(self.messages_key, msg)
+            await r.expire(self.messages_key, DEFAULT_TTL)
+        except Exception:
+            logger.warning("short_term.add_message_failed", run_id=self.run_id)
 
     async def get_messages(self, limit: int = 20) -> list[dict[str, str]]:
         r = await get_redis()
         if r is None:
             return []
-        raw = await r.lrange(self.messages_key, -limit, -1)
-        return [json.loads(m) for m in raw] if raw else []
+        try:
+            raw = await r.lrange(self.messages_key, -limit, -1)
+            return [json.loads(m) for m in raw] if raw else []
+        except Exception:
+            logger.warning("short_term.get_messages_failed", run_id=self.run_id)
+            return []
 
     async def get_all(self) -> dict[str, Any]:
         context = await self.get_context()
@@ -75,4 +89,7 @@ class ShortTermMemory:
         r = await get_redis()
         if r is None:
             return
-        await r.delete(self.context_key, self.messages_key)
+        try:
+            await r.delete(self.context_key, self.messages_key)
+        except Exception:
+            logger.warning("short_term.clear_failed", run_id=self.run_id)

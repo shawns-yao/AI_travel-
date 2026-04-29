@@ -3,10 +3,8 @@
 import time
 
 from app.core.agent import BaseAgent, AgentResult
-from app.core.prompts import prompt_manager
-from app.core.llm import chat_completion
-from app.core.error_handler import safe_json_parse_list
 from app.core.logging import get_logger, log_agent_start, log_agent_done
+from app.core.tool import tool_registry
 
 logger = get_logger("weather_agent")
 
@@ -27,70 +25,42 @@ class WeatherAgent(BaseAgent):
             intent = context.get("IntentAgent", {})
             destination = intent.get("destination", "")
             all_dates = intent.get("all_dates", "")
-            preferences = intent.get("preferences", [])
             dates = [d.strip() for d in all_dates.split(",") if d.strip()] if all_dates else []
 
-            template = prompt_manager.get("WeatherAgent")
-            messages = [
-                {"role": "system", "content": template.render_system()},
-                {"role": "user", "content": template.render_user(
-                    destination=destination,
-                    dates=", ".join(dates) if dates else "unknown",
-                    preferences=str(preferences),
-                )},
-            ]
+            # 天气属于确定性外部信息，不能让 LLM “看心情”决定是否调工具。
+            location_tool = tool_registry.get("get_location_id")
+            weather_tool = tool_registry.get("get_weather_by_location_id")
+            location_id = await location_tool.execute(address=destination)
+            emit_event = context.get("emit_event")
+            if callable(emit_event):
+                emit_event(
+                    "tool.completed",
+                    agent_name=self.name,
+                    tool_name="get_location_id",
+                    success=True,
+                    summary=f"定位到 {destination}",
+                    output={"destination": destination, "location_id": location_id},
+                )
+            parsed = await weather_tool.execute(locationId=location_id, dates=dates)
+            parsed = self._normalize_forecast(parsed, dates)
+            if callable(emit_event):
+                emit_event(
+                    "tool.completed",
+                    agent_name=self.name,
+                    tool_name="get_weather_by_location_id",
+                    success=True,
+                    summary=f"获取 {len(parsed)} 天游玩天气",
+                    output={"forecast": parsed[:3], "source": parsed[0].get("source") if parsed else ""},
+                )
 
-            from app.core.tool import tool_registry as tr
-            tools = []
-            for name in ["get_location_id", "get_weather_by_location_id"]:
-                try:
-                    t = tr.get(name)
-                    tools.append(t.schema.__dict__)
-                except Exception:
-                    pass
-
-            response = await chat_completion(messages=messages, tools=tools if tools else None, temperature=0.5)
-
-            # Handle sequential tool calls
-            content = response.get("content", "")
-            if response.get("tool_calls"):
-                # Execute tool calls in order
-                for tc in response["tool_calls"]:
-                    tool_name = tc["name"]
-                    try:
-                        import json
-                        args = json.loads(tc.get("arguments", "{}"))
-                        tool = tr.get(tool_name)
-                        result = await tool.execute(**args)
-                        messages.append({"role": "assistant", "content": None, "tool_calls": [tc]})
-                        messages.append({"role": "tool", "content": str(result), "tool_call_id": tc.get("id", "")})
-                    except Exception as e:
-                        logger.warning("weather.tool_failed", tool=tool_name, error=str(e))
-
-                follow_up = await chat_completion(messages=messages, temperature=0.5)
-                content = follow_up.get("content", content)
-
-            parsed = safe_json_parse_list(content)
-            if not parsed:
-                parsed = [{
-                    "date": d,
-                    "condition": "unknown",
-                    "temp_high": 20,
-                    "temp_low": 10,
-                    "humidity": 50,
-                    "recommendation": "Weather data unavailable. Plan for moderate conditions.",
-                    "risk_level": "LOW",
-                } for d in dates] if dates else []
-
-            # Compute overall risk
             risk_levels = [d.get("risk_level", "LOW") for d in parsed]
-            risk_analysis = "All clear"
+            risk_analysis = "天气整体适合出行"
             if "CRITICAL" in risk_levels:
-                risk_analysis = "Critical weather risk on some days - consider rescheduling"
+                risk_analysis = "存在严重天气风险，建议调整日期或准备室内备选"
             elif "HIGH" in risk_levels:
-                risk_analysis = "High weather risk - prepare backup indoor plans"
+                risk_analysis = "存在较高天气风险，需要准备室内备选"
             elif "MEDIUM" in risk_levels:
-                risk_analysis = "Minor weather concerns - pack accordingly"
+                risk_analysis = "有轻微天气影响，注意衣物和雨具"
 
             duration_ms = (time.monotonic() - start) * 1000
             log_agent_done(logger, self.name, run_id, duration_ms, risk=risk_analysis)
@@ -103,14 +73,70 @@ class WeatherAgent(BaseAgent):
                     "risk_analysis": risk_analysis,
                 },
                 duration_ms=duration_ms,
-                tool_calls=[{"tool": tc["name"]} for tc in response.get("tool_calls", [])],
+                tool_calls=[
+                    {"tool": "get_location_id", "args": {"address": destination}},
+                    {"tool": "get_weather_by_location_id", "args": {"locationId": location_id, "dates": dates}},
+                ],
             )
         except Exception as e:
             duration_ms = (time.monotonic() - start) * 1000
-            logger.error("weather_agent.failed", error=str(e))
+            logger.warning("weather_agent.fallback", error=str(e))
+            intent = context.get("IntentAgent", {})
+            all_dates = intent.get("all_dates", "")
+            dates = [d.strip() for d in all_dates.split(",") if d.strip()] if all_dates else []
             return AgentResult(
                 agent_name=self.name,
-                success=False,
-                error=str(e),
+                success=True,
+                output={
+                    "forecast": self._fallback_forecast(dates),
+                    "risk_analysis": "Weather API or LLM unavailable, using conservative fallback.",
+                },
                 duration_ms=duration_ms,
             )
+
+    @staticmethod
+    def _fallback_forecast(dates: list[str]) -> list[dict]:
+        return [{
+            "date": d,
+            "condition": "unknown",
+            "temp_high": 20,
+            "temp_low": 10,
+            "humidity": 50,
+            "recommendation": "天气数据暂不可用，优先安排可室内外切换的活动。",
+            "risk_level": "LOW",
+            "source": "fallback",
+        } for d in dates] if dates else []
+
+    @staticmethod
+    def _normalize_forecast(forecast: list[dict], dates: list[str]) -> list[dict]:
+        by_date = {item.get("date"): item for item in forecast if isinstance(item, dict)}
+        result: list[dict] = []
+        for date in dates:
+            item = dict(by_date.get(date) or {})
+            condition = item.get("condition") or "no_data"
+            item["date"] = date
+            item["condition"] = condition
+            item["temp_high"] = int(item.get("temp_high") or 0)
+            item["temp_low"] = int(item.get("temp_low") or 0)
+            item["humidity"] = int(item.get("humidity") or 0)
+            item.setdefault("recommendation", WeatherAgent._recommendation(condition))
+            item.setdefault("risk_level", WeatherAgent._risk_level(condition))
+            item.setdefault("source", "qweather" if condition not in {"unknown", "no_data"} else "fallback")
+            result.append(item)
+        return result
+
+    @staticmethod
+    def _recommendation(condition: str) -> str:
+        if any(token in condition for token in ["雨", "雪", "雷", "rain", "snow", "thunder"]):
+            return "安排室内备选，交通和排队时间预留更宽。"
+        if any(token in condition for token in ["晴", "sunny"]):
+            return "适合户外景点，注意防晒和补水。"
+        return "适合常规行程，保留半小时机动时间。"
+
+    @staticmethod
+    def _risk_level(condition: str) -> str:
+        if any(token in condition for token in ["暴", "雷", "thunderstorm"]):
+            return "HIGH"
+        if any(token in condition for token in ["雨", "雪", "rain", "snow"]):
+            return "MEDIUM"
+        return "LOW"
