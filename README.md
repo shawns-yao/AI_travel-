@@ -4,19 +4,11 @@
 
 当前项目定位是面试作品，不是简单页面 Demo。主链路已经接入 PostgreSQL/pgvector、Redis、高德地图工具、和风天气工具、LLM 配置和 Docker 部署。
 
-![image-20260429214836140](C:\Users\姚少杰\AppData\Roaming\Typora\typora-user-images\image-20260429214836140.png)
+![Home Page](docs/images/screenshot-home.png)
 
-![image-20260429215004729](C:\Users\姚少杰\AppData\Roaming\Typora\typora-user-images\image-20260429215004729.png)
+![Planning](docs/images/screenshot-planning.png)
 
-![image-20260429215412829](C:\Users\姚少杰\AppData\Roaming\Typora\typora-user-images\image-20260429215412829.png)
-
-
-
-
-
-
-
-
+![Result](docs/images/screenshot-result.png)
 
 ## 核心能力
 
