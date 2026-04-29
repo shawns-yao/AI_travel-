@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Bed, Bike, Bus, Clock, Edit3, Plus, RefreshCw, Save, Sparkles, Trash2, Utensils, Wallet } from "lucide-react";
+import { Bed, Bike, Bus, Clock, Edit3, RefreshCw, Save, Sparkles, Trash2, Utensils, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TravelPlanResult } from "@/types";
 
@@ -155,17 +155,6 @@ export function EditPlanPage({ plan, onSave, onOptimize }: EditPlanPageProps) {
                   </div>
                 );
               })}
-
-              <button
-                onClick={() => {
-                  const text = "增加一个景点时段";
-                  addChange(text);
-                }}
-                className="mx-auto mt-5 flex h-14 w-[360px] max-w-full items-center justify-center rounded-xl border border-slate-200 text-base font-bold text-[#0da8ad] hover:border-[#10b8bd] hover:bg-cyan-50"
-              >
-                <Plus className="mr-2 h-5 w-5" />
-                添加时段 / 景点
-              </button>
             </div>
           </div>
 

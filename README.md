@@ -4,6 +4,20 @@
 
 当前项目定位是面试作品，不是简单页面 Demo。主链路已经接入 PostgreSQL/pgvector、Redis、高德地图工具、和风天气工具、LLM 配置和 Docker 部署。
 
+![image-20260429214836140](C:\Users\姚少杰\AppData\Roaming\Typora\typora-user-images\image-20260429214836140.png)
+
+![image-20260429215004729](C:\Users\姚少杰\AppData\Roaming\Typora\typora-user-images\image-20260429215004729.png)
+
+![image-20260429215412829](C:\Users\姚少杰\AppData\Roaming\Typora\typora-user-images\image-20260429215412829.png)
+
+
+
+
+
+
+
+
+
 ## 核心能力
 
 - 多 Agent 编排：`IntentAgent`、`MemoryAgent`、`WeatherAgent`、`BudgetAgent`、`PlannerAgent`、`CriticAgent`
@@ -20,28 +34,6 @@
 - Backend：FastAPI、Pydantic、SQLAlchemy Async、SSE
 - Infra：PostgreSQL 16 + pgvector、Redis 7、Nginx、Docker Compose
 - AI：OpenAI-compatible API / Anthropic API
-
-## 密钥策略
-
-真实 API Key 只放在本机环境文件或部署平台的 Secret 里，不能提交到 Git。
-
-本项目已经忽略：
-
-```text
-.env
-.env.*
-server/.env
-server/.env.*
-```
-
-仓库里只提交：
-
-```text
-.env.example
-server/.env.example
-```
-
-如果你之前在前端“服务配置”页面填写过 Key，那些 Key 存在浏览器 `localStorage`，不会跟着 Git 上传。部署时仍然建议写入 `server/.env` 或 GitHub/Vercel/服务器 Secret。
 
 ## 环境变量
 
@@ -176,41 +168,3 @@ Docker 镜像构建：
 docker build -f docker/Dockerfile.api -t travel-agent-api:local server
 docker build -f docker/Dockerfile.web -t travel-agent-web:local .
 ```
-
-## GitHub 上传前检查
-
-上传前先跑：
-
-```powershell
-git status --short
-git ls-files | Select-String -Pattern '(^|/)\.env$|\.pem$|\.key$'
-```
-
-确认没有 `server/.env`、`.env`、私钥文件、日志文件进入暂存区。
-
-添加远程仓库：
-
-```powershell
-git remote set-url origin https://github.com/shawns-yao/AI_travel-.git
-git branch -M main
-git push -u origin main
-```
-
-如果 GitHub Actions 需要外部 API，把这些配置放进仓库的 `Settings -> Secrets and variables -> Actions`：
-
-```text
-LLM_API_KEY
-DASHSCOPE_API_KEY
-QWEATHER_API_KEY
-AMAP_API_KEY
-```
-
-## 当前边界
-
-这个项目已经能作为 Agent 项目继续扩展，但还不是工业级生产系统。后续最值得补：
-
-- OAuth 和真实多用户隔离
-- Hotel/Food/Attraction/Traffic 拆成独立 Agent
-- 多人协作规划与冲突协商
-- Alembic 迁移脚本
-- 更完整的前端测试和端到端测试

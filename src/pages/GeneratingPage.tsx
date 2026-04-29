@@ -1,5 +1,5 @@
 import { CalendarCheck, CloudSun, Hotel, ListChecks, MapPin, Wallet } from "lucide-react";
-import { SSERunEvent } from "@/types";
+import { MapData, POI, SSERunEvent } from "@/types";
 import { RouteMapMock } from "@/components/travel/RouteMapMock";
 
 interface GeneratingPageProps {
@@ -48,12 +48,21 @@ const listNames = (items: unknown, limit = 3) =>
         .filter(Boolean)
     : [];
 
+const budgetLabels: Record<string, string> = {
+  transport: "交通",
+  accommodation: "住宿",
+  meals: "餐饮",
+  attractions: "景点门票",
+  shopping: "购物",
+  contingency: "机动",
+};
+
 const budgetSummary = (output?: Record<string, unknown>) => {
   const allocated = output?.allocated;
   if (!allocated || typeof allocated !== "object") return "";
   return Object.entries(allocated as Record<string, unknown>)
     .slice(0, 4)
-    .map(([key, value]) => `${key} ¥${Math.round(Number(value) || 0)}`)
+    .map(([key, value]) => `${budgetLabels[key] ?? key} ¥${Math.round(Number(value) || 0)}`)
     .join(" · ");
 };
 
@@ -75,6 +84,18 @@ const latestToolItems = (events: SSERunEvent[], category: string, limit = 3) => 
   return listNames(output?.items, limit);
 };
 
+const latestToolPois = (events: SSERunEvent[], category: string, limit = 5): POI[] => {
+  const event = [...events]
+    .reverse()
+    .find((item) => item.type === "tool.completed" && item.data.category === category);
+  const output = event?.data.output as Record<string, unknown> | undefined;
+  const items = output?.items;
+  if (!Array.isArray(items)) return [];
+  return items
+    .filter((item): item is POI => typeof item === "object" && item !== null && "name" in item)
+    .slice(0, limit);
+};
+
 const latestToolSummary = (events: SSERunEvent[]) =>
   events
     .filter((event) => event.type === "tool.completed" || event.type === "memory.hit")
@@ -93,6 +114,7 @@ export function GeneratingPage({ events, query }: GeneratingPageProps) {
   const hotels = listNames(plannerOutput?.hotels, 3);
   const liveHotels = hotels.length ? hotels : latestToolItems(events, "酒店", 3);
   const liveAttractions = latestToolItems(events, "景点", 4);
+  const liveAttractionPois = latestToolPois(events, "景点", 5);
   const liveFood = latestToolItems(events, "餐饮", 1);
   const budgetText = budgetSummary(budgetOutput);
   const routeText = routeSummary(plannerOutput);
@@ -114,6 +136,19 @@ export function GeneratingPage({ events, query }: GeneratingPageProps) {
       fallback: `D1 / D2 / D${duration} 时间轴生成中`,
     },
   ];
+  const previewCenter = liveAttractionPois.find((item) => item.location)?.location;
+  const previewMapData: MapData | null = liveAttractionPois.length
+    ? {
+        destination,
+        center: previewCenter
+          ? { city: destination, location: previewCenter, source: "amap" }
+          : { city: destination, source: "amap" },
+        attractions: liveAttractionPois,
+        food: latestToolPois(events, "餐饮", 3),
+        hotels: latestToolPois(events, "酒店", 3),
+        routes: [],
+      }
+    : null;
 
   return (
     <section className="relative min-h-[calc(100vh-68px)] overflow-hidden bg-gradient-to-br from-cyan-50 via-white to-white">
@@ -159,7 +194,7 @@ export function GeneratingPage({ events, query }: GeneratingPageProps) {
           </div>
 
           <div className="relative overflow-hidden rounded-2xl">
-            <RouteMapMock muted previewLabel="推荐路线" />
+              <RouteMapMock mapData={previewMapData} previewLabel="推荐路线" />
           </div>
         </div>
 

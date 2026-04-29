@@ -2,11 +2,11 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from app.api.plans import _plan_payload
-from app.services.run_service import _normalize_daily_plans
+from app.services.plan_normalizer import normalize_daily_plans
 
 
 def test_normalize_daily_plans_keeps_only_one_dinner():
-    result = _normalize_daily_plans([
+    result = normalize_daily_plans([
         {
             "day": 1,
             "date": "2026-05-01",

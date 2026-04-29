@@ -8,40 +8,13 @@ from sqlalchemy import update
 
 from app.db.models import AgentRun, TravelPlan
 from app.db.session import async_session_factory
+from app.services.plan_normalizer import normalize_daily_plans
 from app.services.run_service import DEMO_USER_ID
 
 router = APIRouter(prefix="/api/plans", tags=["plans"])
 
 
 def _plan_payload(row: TravelPlan) -> dict:
-    daily_plans = []
-    for index, item in enumerate(row.daily_plans or [], start=1):
-        if not isinstance(item, dict):
-            continue
-        day = dict(item)
-        day["day"] = int(day.get("day") or index)
-        day["date"] = str(day.get("date") or "")
-        day["activities"] = day.get("activities") if isinstance(day.get("activities"), list) else []
-        meals = day.get("meals") if isinstance(day.get("meals"), list) else []
-        dinner = next(
-            (
-                meal
-                for meal in meals
-                if isinstance(meal, dict)
-                and (meal.get("type") == "dinner" or "晚" in str(meal.get("time", "")))
-            ),
-            meals[0] if meals and isinstance(meals[0], dict) else None,
-        )
-        if isinstance(dinner, dict):
-            dinner = dict(dinner)
-            dinner["type"] = "dinner"
-            dinner["time"] = "晚上"
-            day["meals"] = [dinner]
-        else:
-            day["meals"] = []
-        day["notes"] = str(day.get("notes") or "")
-        daily_plans.append(day)
-
     return {
         "id": str(row.id),
         "destination": row.destination,
@@ -49,7 +22,7 @@ def _plan_payload(row: TravelPlan) -> dict:
         "start_date": row.start_date or "",
         "budget": row.budget or 0,
         "preferences": row.preferences or [],
-        "daily_plans": daily_plans,
+        "daily_plans": normalize_daily_plans(row.daily_plans or []),
         "map_data": row.map_data,
         "weather": row.weather_data,
         "budget_breakdown": row.budget_breakdown,

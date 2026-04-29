@@ -148,9 +148,6 @@ function App() {
             handleOpenPlan(plan);
             setView("edit");
           }}
-          onDuplicate={(plan) =>
-            handlePlanQuery(`我想重新规划${plan.destination}${plan.duration}日游，预算${plan.budget}元，保留当前偏好并优化路线`)
-          }
           onDelete={handleDeletePlan}
         />
       )}

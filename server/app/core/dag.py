@@ -454,23 +454,7 @@ def build_travel_dag(
     run_id: str,
     agent_names: list[str] | None = None,
 ) -> DAGPlan:
-    """Build the standard travel planning DAG.
-
-    Default DAG:
-      IntentAgent
-        ├── MemoryAgent
-        ├── WeatherAgent
-        ├── TrafficAgent
-        ├── HotelAgent
-        ├── FoodAgent
-        └── AttractionAgent
-              ↓
-        BudgetAgent
-              ↓
-        ItineraryOptimizerAgent
-              ↓
-        CriticAgent
-    """
+    """Build the standard travel planning DAG for currently implemented agents."""
     if agent_names is None:
         agent_names = [
             "IntentAgent",
@@ -491,8 +475,7 @@ def build_travel_dag(
         node_map["IntentAgent"] = n
 
     # Parallel agents: depend on IntentAgent
-    parallel_agents = ["MemoryAgent", "WeatherAgent", "TrafficAgent",
-                       "HotelAgent", "FoodAgent", "AttractionAgent"]
+    parallel_agents = ["MemoryAgent", "WeatherAgent"]
     for name in parallel_agents:
         if name in agent_names:
             deps = ["IntentAgent"] if "IntentAgent" in node_map else []
@@ -508,15 +491,6 @@ def build_travel_dag(
         nodes.append(n)
         node_map["BudgetAgent"] = n
 
-    # ItineraryOptimizer: depends on BudgetAgent
-    if "ItineraryOptimizerAgent" in agent_names:
-        deps = ["BudgetAgent"] if "BudgetAgent" in node_map else []
-        n = DAGNode(agent_name="ItineraryOptimizerAgent",
-                     node_id="ItineraryOptimizerAgent",
-                     dependencies=deps, required=False)
-        nodes.append(n)
-        node_map["ItineraryOptimizerAgent"] = n
-
     # PlannerAgent: depends on BudgetAgent and available context
     if "PlannerAgent" in agent_names:
         deps = [name for name in ["IntentAgent", "BudgetAgent", "WeatherAgent", "MemoryAgent"] if name in node_map]
@@ -529,12 +503,10 @@ def build_travel_dag(
         nodes.append(n)
         node_map["PlannerAgent"] = n
 
-    # CriticAgent: depends on PlannerAgent, BudgetAgent (or ItineraryOptimizer)
+    # CriticAgent: depends on PlannerAgent and BudgetAgent
     if "CriticAgent" in agent_names:
         deps = []
-        if "ItineraryOptimizerAgent" in node_map:
-            deps.append("ItineraryOptimizerAgent")
-        elif "PlannerAgent" in node_map:
+        if "PlannerAgent" in node_map:
             deps.extend(["PlannerAgent"])
             if "BudgetAgent" in node_map:
                 deps.append("BudgetAgent")

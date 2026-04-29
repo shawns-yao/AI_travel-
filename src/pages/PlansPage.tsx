@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Archive, Calendar, CheckCircle2, Copy, Download, Edit3, Plus, Share2, Trash2, Users, Wallet } from "lucide-react";
+import { Archive, Calendar, CheckCircle2, Download, Edit3, Plus, Share2, Trash2, Users, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TravelPlanResult } from "@/types";
 
@@ -7,7 +7,6 @@ interface PlansPageProps {
   plans: TravelPlanResult[];
   onNew: () => void;
   onOpenPlan: (plan: TravelPlanResult) => void;
-  onDuplicate: (plan: TravelPlanResult) => void;
   onDelete: (plan: TravelPlanResult) => void | Promise<void>;
 }
 
@@ -67,7 +66,7 @@ const exportPlan = (plan: TravelPlanResult) => {
   URL.revokeObjectURL(url);
 };
 
-export function PlansPage({ plans, onNew, onOpenPlan, onDuplicate, onDelete }: PlansPageProps) {
+export function PlansPage({ plans, onNew, onOpenPlan, onDelete }: PlansPageProps) {
   const [activeTab, setActiveTab] = useState<"全部" | PlanStatus>("全部");
   const [deletingIds, setDeletingIds] = useState<string[]>([]);
 
@@ -144,9 +143,8 @@ export function PlansPage({ plans, onNew, onOpenPlan, onDuplicate, onDelete }: P
                   <span className="flex items-center gap-1"><Wallet className="h-4 w-4" />{item.budget}</span>
                 </div>
                 <p className="mt-4 min-h-[48px] text-sm leading-6 text-slate-600">{item.desc}</p>
-                <div className="mt-5 grid grid-cols-4 gap-2 border-t pt-4 text-xs font-semibold text-slate-500">
+                <div className="mt-5 grid grid-cols-3 gap-2 border-t pt-4 text-xs font-semibold text-slate-500">
                   <button onClick={() => onOpenPlan(item.plan)} className="flex min-h-10 items-center justify-center gap-1 rounded-lg hover:bg-cyan-50 hover:text-[#0da8ad]"><Edit3 className="h-4 w-4" />编辑</button>
-                  <button onClick={() => onDuplicate(item.plan)} className="flex min-h-10 items-center justify-center gap-1 rounded-lg hover:bg-cyan-50 hover:text-[#0da8ad]"><Copy className="h-4 w-4" />复制</button>
                   <button onClick={() => exportPlan(item.plan)} className="flex min-h-10 items-center justify-center gap-1 rounded-lg hover:bg-cyan-50 hover:text-[#0da8ad]"><Download className="h-4 w-4" />导出</button>
                   <button
                     onClick={() => void deletePlan(item)}

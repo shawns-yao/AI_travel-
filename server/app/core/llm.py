@@ -107,6 +107,8 @@ async def chat_completion(
         params["response_format"] = response_format
 
     response = await _openai_client().chat.completions.create(**params)
+    if not response.choices:
+        raise ValueError("LLM response contains no choices")
     choice = response.choices[0]
     message = choice.message
 
