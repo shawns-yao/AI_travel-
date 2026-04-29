@@ -1,6 +1,6 @@
 import { CalendarCheck, CloudSun, Hotel, ListChecks, MapPin, Wallet } from "lucide-react";
 import { MapData, POI, SSERunEvent } from "@/types";
-import { RouteMapMock } from "@/components/travel/RouteMapMock";
+import { RouteMap } from "@/components/travel/RouteMap";
 
 interface GeneratingPageProps {
   events: SSERunEvent[];
@@ -194,7 +194,7 @@ export function GeneratingPage({ events, query }: GeneratingPageProps) {
           </div>
 
           <div className="relative overflow-hidden rounded-2xl">
-              <RouteMapMock mapData={previewMapData} previewLabel="推荐路线" />
+              <RouteMap mapData={previewMapData} previewLabel="推荐路线" />
           </div>
         </div>
 

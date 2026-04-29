@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Calendar, CheckCircle2, Download, Hotel, Save, Share2, Utensils, Users, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TravelPlanResult } from "@/types";
-import { RouteMapMock } from "@/components/travel/RouteMapMock";
+import { RouteMap } from "@/components/travel/RouteMap";
 
 interface ResultPageProps {
   plan: TravelPlanResult;
@@ -32,14 +32,14 @@ const isMissingWeather = (day: { condition?: string; temp_high?: number; temp_lo
   day.condition === "no_data" || day.condition === "unknown" || day.source === "fallback";
 
 const weatherLabel = (condition?: string) => {
-  if (condition === "no_data") return "暂无预报";
-  if (condition === "unknown") return "待更新";
-  return condition || "待更新";
+  if (condition === "no_data") return "超出 7 日预报";
+  if (condition === "unknown") return "暂无实时天气";
+  return condition || "暂无实时天气";
 };
 
 const weatherMeta = (day: { condition?: string; temp_high?: number; temp_low?: number; source?: string }) => {
-  if (day.condition === "no_data") return "超出7日";
-  if (isMissingWeather(day)) return "天气待查";
+  if (day.condition === "no_data") return "出行日期超出范围";
+  if (isMissingWeather(day)) return "接口未返回";
   return `${day.temp_low}° / ${day.temp_high}°`;
 };
 
@@ -207,7 +207,7 @@ export function ResultPage({ plan, onSave, onDuplicate }: ResultPageProps) {
           </div>
 
           <aside className="space-y-4">
-            <RouteMapMock mapData={plan.map_data} />
+            <RouteMap mapData={plan.map_data} />
 
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="mb-4 flex items-center justify-between">
@@ -224,7 +224,7 @@ export function ResultPage({ plan, onSave, onDuplicate }: ResultPageProps) {
                 ))}
                 {!plan.weather?.forecast?.length && (
                   <div className="col-span-3 rounded-xl bg-cyan-50 p-4 text-sm font-semibold text-slate-500">
-                    天气数据待更新
+                    未获取到天气数据
                   </div>
                 )}
               </div>
