@@ -11,6 +11,7 @@ def pytest_sessionstart(session):
         from sqlalchemy import text
 
         async with engine.begin() as conn:
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS travel"))
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await conn.run_sync(Base.metadata.create_all)
 

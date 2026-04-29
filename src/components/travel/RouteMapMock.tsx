@@ -10,11 +10,44 @@ interface RouteMapMockProps {
 
 declare global {
   interface Window {
-    AMap?: any;
+    AMap?: AMapNamespace;
   }
 }
 
 let amapLoader: Promise<void> | null = null;
+
+interface AMapInstance {
+  setFitView: (overlays: AMapOverlay[], immediately?: boolean, avoid?: number[]) => void;
+  destroy: () => void;
+}
+
+interface AMapOverlay {
+  setMap: (map: AMapInstance) => void;
+}
+
+interface AMapNamespace {
+  Map: new (
+    container: HTMLElement,
+    options: {
+      zoom: number;
+      center: [number, number];
+      resizeEnable: boolean;
+      mapStyle: string;
+    },
+  ) => AMapInstance;
+  Marker: new (options: {
+    position: [number, number];
+    title: string;
+    label: { content: string; direction: string };
+  }) => AMapOverlay;
+  Polyline: new (options: {
+    path: [number, number][];
+    strokeColor: string;
+    strokeWeight: number;
+    strokeStyle: string;
+    lineJoin: string;
+  }) => AMapOverlay;
+}
 
 const fallbackNames = ["灵隐寺", "断桥残雪", "河坊街", "南宋御街", "白堤"];
 const fallbackCenter: Coordinate = { lng: 120.1551, lat: 30.2741 };
@@ -69,7 +102,7 @@ const getPoints = (mapData?: MapData | null) =>
 
 export function RouteMapMock({ mapData, muted = false, previewLabel }: RouteMapMockProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<any>(null);
+  const mapRef = useRef<AMapInstance | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [mapFailed, setMapFailed] = useState(false);
   const apiSettings = useMemo(loadApiSettings, []);
@@ -89,8 +122,9 @@ export function RouteMapMock({ mapData, muted = false, previewLabel }: RouteMapM
     loadAmap(apiSettings.amapApiKey || "", apiSettings.amapJsUrl)
       .then(() => {
         if (cancelled || !containerRef.current || !window.AMap) return;
+        const AMap = window.AMap;
         containerRef.current.innerHTML = "";
-        const map = new window.AMap.Map(containerRef.current, {
+        const map = new AMap.Map(containerRef.current, {
           zoom: 12,
           center: [center.lng, center.lat],
           resizeEnable: true,
@@ -105,7 +139,7 @@ export function RouteMapMock({ mapData, muted = false, previewLabel }: RouteMapM
             }));
 
         const markers = points.map((point, index) => {
-          const marker = new window.AMap.Marker({
+          const marker = new AMap.Marker({
             position: [point.location.lng, point.location.lat],
             title: point.name,
             label: {
@@ -118,8 +152,8 @@ export function RouteMapMock({ mapData, muted = false, previewLabel }: RouteMapM
         });
 
         if (points.length > 1) {
-          const path = points.map((point) => [point.location.lng, point.location.lat]);
-          const polyline = new window.AMap.Polyline({
+          const path = points.map((point): [number, number] => [point.location.lng, point.location.lat]);
+          const polyline = new AMap.Polyline({
             path,
             strokeColor: "#10b8bd",
             strokeWeight: 5,
@@ -141,7 +175,7 @@ export function RouteMapMock({ mapData, muted = false, previewLabel }: RouteMapM
 
     return () => {
       cancelled = true;
-      if (mapRef.current?.destroy) {
+      if (mapRef.current) {
         mapRef.current.destroy();
         mapRef.current = null;
       }

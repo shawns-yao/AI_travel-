@@ -153,7 +153,7 @@ export function ResultPage({ plan, onSave, onDuplicate }: ResultPageProps) {
           </aside>
 
           <div>
-            <div className="mb-4 text-xl font-bold">Day {currentDay?.day ?? 1}　{currentDay?.activities?.[0]?.name || `抵达${plan.destination || "杭州"}`}</div>
+            <div className="mb-4 text-xl font-bold">Day {currentDay?.day ?? 1} {currentDay?.activities?.[0]?.name || `抵达${plan.destination || "杭州"}`}</div>
             {selectedOptimizations.length > 0 && (
               <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-cyan-100 bg-cyan-50/80 p-3">
                 <div className="flex-1 text-sm font-semibold text-slate-700">{selectedOptimizations.join("，")}</div>
