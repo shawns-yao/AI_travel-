@@ -1,5 +1,6 @@
 """PlannerAgent: creates structured daily travel itinerary data."""
 
+import re
 import time
 from datetime import datetime, timedelta
 
@@ -139,6 +140,12 @@ class PlannerAgent(BaseAgent):
                         "source": note.get("source") or "amap",
                     })
             attractions = self._sort_route_points(resolved.must_include, attractions)
+            attractions = await self._attach_place_images(
+                attractions,
+                city=resolved.search_city,
+                focus=resolved.must_include,
+                emit_event=emit_event,
+            )
             if callable(emit_event):
                 emit_event(
                     "tool.completed",
@@ -265,6 +272,89 @@ class PlannerAgent(BaseAgent):
                 next_note["source"] = matched.get("source")
             enriched.append(next_note)
         return enriched
+
+    @staticmethod
+    async def _attach_place_images(
+        pois: list[dict],
+        city: str,
+        focus: str,
+        emit_event=None,
+    ) -> list[dict]:
+        search_tool = tool_registry.get("mcp_web_search")
+        enriched: list[dict] = []
+        for poi in pois:
+            if not isinstance(poi, dict):
+                continue
+            next_poi = dict(poi)
+            place_name = PlannerAgent._place_display_name(str(next_poi.get("name") or ""))
+            if not place_name:
+                enriched.append(next_poi)
+                continue
+            query = f"{city} {focus} {place_name} 景点实景 全景 建筑 无人 无游客 官方 图片"
+            try:
+                results = await search_tool.execute(query=query, limit=8)
+                image = PlannerAgent._select_place_image(place_name, results)
+                if image:
+                    next_poi["photo"] = image
+                    next_poi["photo_source"] = "web_search"
+                if callable(emit_event):
+                    emit_event(
+                        "tool.completed",
+                        agent_name=PlannerAgent.name,
+                        tool_name="mcp_web_search",
+                        success=True,
+                        destination=focus,
+                        category="景点图片",
+                        summary=f"检索图片：{place_name}",
+                        output={"destination": focus, "query": query, "items": results[:3]},
+                    )
+            except Exception as e:
+                logger.warning("planner_agent.place_image_failed", place=place_name, error=str(e))
+            enriched.append(next_poi)
+        return enriched
+
+    @staticmethod
+    def _select_place_image(place_name: str, results: list[dict]) -> str:
+        if not isinstance(results, list):
+            return ""
+        normalized_name = PlannerAgent._normalize_place_text(place_name)
+        tokens = [
+            token
+            for token in re.split(r"[-/·（）()\s]+", place_name)
+            if len(PlannerAgent._normalize_place_text(token)) >= 2
+        ]
+        candidates = [normalized_name, *[PlannerAgent._normalize_place_text(token) for token in tokens]]
+        blocked_words = [
+            "人群", "游客", "排队", "打卡照", "写真", "人像", "美女", "婚纱", "亲子",
+            "团队", "导游", "小吃", "美食", "酒店", "民宿", "攻略路线", "地图",
+        ]
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            image = str(item.get("image") or "").strip()
+            if not image or re.search(r"unsplash|picsum|placeholder|avatar|logo", image, re.I):
+                continue
+            text = str(item.get("title") or "") + str(item.get("snippet") or "") + str(item.get("content") or "")
+            if any(word in text for word in blocked_words):
+                continue
+            normalized_text = PlannerAgent._normalize_place_text(text)
+            if any(candidate and candidate in normalized_text for candidate in candidates):
+                return image
+        return ""
+
+    @staticmethod
+    def _normalize_place_text(value: str) -> str:
+        return re.sub(
+            r"(厦门市|泉州市|鼓浪屿|风景名胜区|景区|景点|旅游|攻略|图片|官方|实景|全景|建筑|无人|无游客|推荐|[-_·\s（）()])",
+            "",
+            value,
+        )
+
+    @staticmethod
+    def _place_display_name(name: str) -> str:
+        value = re.sub(r"^(厦门市|泉州市)?鼓浪屿风景名胜区[-—·]?", "", str(name or "").strip())
+        value = re.sub(r"^(厦门市|泉州市)", "", value)
+        return value or name.strip()
 
     @staticmethod
     def _sort_route_points(required_focus: str, pois: list[dict]) -> list[dict]:
@@ -431,6 +521,7 @@ class PlannerAgent(BaseAgent):
                             "cost": round(attraction_budget / max(duration, 1) * 0.45),
                             "source": morning_poi.get("source"),
                             "coordinate": morning_poi.get("location"),
+                            "photo": morning_poi.get("photo") or "",
                         },
                         {
                             "id": f"day{index}_afternoon",
@@ -443,6 +534,7 @@ class PlannerAgent(BaseAgent):
                             "cost": round(attraction_budget / max(duration, 1) * 0.35),
                             "source": afternoon_poi.get("source"),
                             "coordinate": afternoon_poi.get("location"),
+                            "photo": afternoon_poi.get("photo") or "",
                         },
                         {
                             "id": f"day{index}_evening",
@@ -455,6 +547,7 @@ class PlannerAgent(BaseAgent):
                             "cost": round(attraction_budget / max(duration, 1) * 0.2),
                             "source": evening_poi.get("source"),
                             "coordinate": evening_poi.get("location"),
+                            "photo": evening_poi.get("photo") or "",
                         },
                     ],
                     "meals": [
@@ -468,6 +561,7 @@ class PlannerAgent(BaseAgent):
                             "cost": round(meal_budget / max(duration, 1) * 0.75),
                             "source": dinner_poi.get("source"),
                             "coordinate": dinner_poi.get("location"),
+                            "photo": dinner_poi.get("photo") or "",
                         },
                     ],
                     "notes": "。".join([item for item in [weather_note.rstrip("。"), strategy_note] if item]),
@@ -508,6 +602,8 @@ class PlannerAgent(BaseAgent):
                     activity["location"] = replacement.get("address") or required_focus
                     activity["coordinate"] = replacement.get("location")
                     activity["source"] = replacement.get("source")
+                    if replacement.get("photo"):
+                        activity["photo"] = replacement.get("photo")
                     activity["description"] = f"围绕{required_focus}安排明确景点，不生成空泛自由活动。"
                 if required_focus and required_focus in name:
                     focus_seen = True
@@ -516,12 +612,14 @@ class PlannerAgent(BaseAgent):
                     required_focus=required_focus,
                     slot=str(activity.get("time") or ""),
                 )
-                if not activity.get("coordinate"):
-                    matched_poi = self._match_poi_for_activity(activity, fallback_names)
-                    if matched_poi:
+                matched_poi = self._match_poi_for_activity(activity, fallback_names)
+                if matched_poi:
+                    if not activity.get("coordinate"):
                         activity["location"] = matched_poi.get("address") or activity.get("location") or required_focus
                         activity["coordinate"] = matched_poi.get("location")
                         activity["source"] = matched_poi.get("source")
+                    if matched_poi.get("photo"):
+                        activity["photo"] = matched_poi.get("photo")
                 activities.append(activity)
 
             if not activities:
@@ -537,6 +635,7 @@ class PlannerAgent(BaseAgent):
                     "cost": 0,
                     "source": replacement.get("source"),
                     "coordinate": replacement.get("location"),
+                    "photo": replacement.get("photo") or "",
                 })
                 focus_seen = True
 
@@ -555,6 +654,8 @@ class PlannerAgent(BaseAgent):
             first_activity["location"] = first_poi.get("address") or required_focus
             first_activity["coordinate"] = first_poi.get("location")
             first_activity["source"] = first_poi.get("source")
+            if first_poi.get("photo"):
+                first_activity["photo"] = first_poi.get("photo")
             first_activity["description"] = f"{required_focus}是用户输入的核心目的地，必须进入主路线。"
 
         return cleaned

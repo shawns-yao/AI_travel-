@@ -133,7 +133,7 @@ class MCPWebSearchTool(BaseTool):
             response.raise_for_status()
             data = response.json()
         items = data.get("references", []) if isinstance(data, dict) else []
-        return [
+        results = [
             self._result(
                 item.get("title") or item.get("web_anchor"),
                 item.get("url"),
@@ -141,9 +141,11 @@ class MCPWebSearchTool(BaseTool):
                 "baidu",
                 image=item.get("image"),
             )
-            for item in items[:limit]
+            for item in items
             if isinstance(item, dict)
         ]
+        results.sort(key=lambda item: 0 if item.get("image") else 1)
+        return results[:limit]
 
     async def _search_duckduckgo(self, query: str, limit: int) -> list[dict[str, str]]:
         base_url = settings.web_search_base_url or "https://duckduckgo.com/html/"

@@ -148,6 +148,21 @@ const getPoints = (mapData?: MapData | null) =>
 const coordinateKey = (point?: Coordinate) =>
   point ? `${point.lng.toFixed(6)},${point.lat.toFixed(6)}` : "";
 
+const compactPlaceName = (name: string) => {
+  const cleaned = name
+    .replace(/^(厦门市|泉州市)?鼓浪屿风景名胜区[-—·]?/, "")
+    .replace(/^(厦门市|泉州市)/, "")
+    .trim();
+  return cleaned || name;
+};
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
 export function RouteMap({ mapData, muted = false, previewLabel, heightClass = "min-h-[330px]" }: RouteMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<AMapInstance | null>(null);
@@ -189,11 +204,12 @@ export function RouteMap({ mapData, muted = false, previewLabel, heightClass = "
         });
 
         const markers = renderPoints.map((point, index) => {
+          const label = escapeHtml(compactPlaceName(point.name));
           const marker = new AMap.Marker({
             position: [point.location.lng, point.location.lat],
-            title: point.name,
+            title: label,
             label: {
-              content: `<div style="padding:4px 8px;border-radius:999px;background:white;box-shadow:0 6px 18px rgba(15,23,42,.16);font-weight:700;color:#0f172a;">${index + 1} ${point.name}</div>`,
+              content: `<div style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 8px;border-radius:999px;background:white;box-shadow:0 6px 18px rgba(15,23,42,.16);font-weight:700;color:#0f172a;">${index + 1} ${label}</div>`,
               direction: "right",
             },
           });
@@ -306,7 +322,7 @@ function FallbackMap({ points, routeDistance, muted, label, heightClass }: Fallb
         <div key={`${point.name}-${index}`} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${point.x}%`, top: `${point.y}%` }}>
           <div className="flex max-w-[240px] items-center gap-2 rounded-full bg-white/90 px-2 py-1 text-xs font-bold text-slate-800 shadow">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#12b9bd] text-white">{index + 1}</span>
-            <span className="line-clamp-2">{point.name}</span>
+            <span className="line-clamp-2">{compactPlaceName(point.name)}</span>
           </div>
         </div>
       ))}

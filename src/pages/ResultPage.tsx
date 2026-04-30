@@ -119,15 +119,35 @@ const defaultTips = (plan: TravelPlanResult) => ({
   backup: [],
 });
 
+const cleanInfoText = (value: string) =>
+  String(value || "")
+    .replace(/[。；;]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const uniqueInfoList = (values?: string[], fallback: string[] = [], limit = 4) => {
+  const seen = new Set<string>();
+  return [...(values ?? []), ...fallback]
+    .map(cleanInfoText)
+    .filter((item) => {
+      if (!item) return false;
+      const key = item.replace(/[，,、：:。“”"「」]/g, "");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, limit);
+};
+
 const travelTips = (plan: TravelPlanResult) => {
   const tips = plan.map_data?.travel_tips;
   const fallback = defaultTips(plan);
   return {
-    pre_trip: tips?.pre_trip?.length ? tips.pre_trip : fallback.pre_trip,
-    food: tips?.food?.length ? tips.food : fallback.food,
-    hotel: tips?.hotel?.length ? tips.hotel : fallback.hotel,
-    avoidance: tips?.avoidance?.length ? tips.avoidance : fallback.avoidance,
-    backup: tips?.backup?.length ? tips.backup : fallback.backup,
+    pre_trip: uniqueInfoList(tips?.pre_trip, fallback.pre_trip, 4),
+    food: uniqueInfoList(tips?.food, fallback.food, 4),
+    hotel: uniqueInfoList(tips?.hotel, fallback.hotel, 3),
+    avoidance: uniqueInfoList(tips?.avoidance, fallback.avoidance, 4),
+    backup: uniqueInfoList(tips?.backup, fallback.backup, 4),
   };
 };
 
@@ -424,7 +444,7 @@ export function ResultPage({ plan, onSave, onEdit }: ResultPageProps) {
           </section>
         )}
 
-        <div className="mt-6 grid items-start gap-5 lg:grid-cols-3">
+        <div className="mt-6 grid items-stretch gap-5 lg:grid-cols-3">
           <InfoPanel title="行前准备" icon={Luggage}>
             {tips.pre_trip.map((item) => <InfoItem key={item} text={item} />)}
           </InfoPanel>
@@ -445,9 +465,9 @@ export function ResultPage({ plan, onSave, onEdit }: ResultPageProps) {
 
 function InfoPanel({ title, icon: Icon, children }: { title: string; icon: typeof Luggage; children: ReactNode }) {
   return (
-    <div className="h-fit rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="flex h-full min-h-[260px] flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-center gap-2 font-bold"><Icon className="h-5 w-5 text-[#0da8ad]" />{title}</div>
-      <div className="flex flex-wrap gap-2">{children}</div>
+      <div className="flex flex-1 content-start flex-wrap gap-2">{children}</div>
     </div>
   );
 }
