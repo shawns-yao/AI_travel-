@@ -96,6 +96,22 @@ class TestIntentAgentExecution:
         assert start == datetime.now().date() + timedelta(days=1)
         assert len(parsed["all_dates"].split(",")) == 3
 
+    def test_fallback_parse_extracts_budget_variant_profile(self):
+        parsed = IntentAgent._fallback_parse("请按省钱版生成旅行方案，目的地：鼓浪屿，3天，公共交通优先，住宿选地铁沿线")
+
+        assert parsed["plan_variant"] == "省钱版"
+        assert parsed["variant_profile"]["transport"] == "public_transit"
+        assert "公共交通优先" in parsed["variant_profile"]["strategy_tags"]
+
+    def test_normalize_parsed_adds_variant_tags_to_preferences(self):
+        parsed = IntentAgent._normalize_parsed(
+            {"destination": "厦门", "duration": 3, "preferences": []},
+            "请按省钱版生成旅行方案，目的地：厦门，公共交通优先",
+        )
+
+        assert parsed["plan_variant"] == "省钱版"
+        assert "公共交通优先" in parsed["preferences"]
+
     @pytest.mark.integration
     async def test_parse_simple_query(self):
         agent = IntentAgent()
@@ -125,6 +141,18 @@ class TestIntentAgentExecution:
         result = await agent.execute({"query": "test", "run_id": "test"})
         # Should return a result (success or failure), not raise
         assert isinstance(result.success, bool)
+
+
+class TestBudgetAgentExecution:
+    def test_apply_budget_variant_changes_allocations(self):
+        parsed = BudgetAgent._fallback_budget(3000)
+        profile = IntentAgent._variant_profile("省钱版")
+
+        result = BudgetAgent._apply_variant_budget(parsed, 3000, profile)
+
+        assert result["variant_profile"]["name"] == "省钱版"
+        assert result["allocated"]["transport"] == 540
+        assert "公共交通" in result["suggestions"][-1]
 
 
 class TestCriticAgentExecution:
@@ -158,7 +186,7 @@ class TestAgentRegistration:
         # Re-import to ensure registration
         import app.agents  # noqa: F401
         names = agent_registry.list_names()
-        for name in ["IntentAgent", "MemoryAgent", "WeatherAgent", "BudgetAgent", "PlannerAgent", "CriticAgent"]:
+        for name in ["IntentAgent", "MemoryAgent", "WeatherAgent", "BudgetAgent", "GuideAgent", "PlannerAgent", "CriticAgent"]:
             assert name in names, f"{name} not registered"
 
     def test_agent_dag_ready(self):

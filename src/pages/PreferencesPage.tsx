@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, CloudSun, KeyRound, ListRestart, MapPin, Save, Server, Sparkles, TestTube2 } from "lucide-react";
+import { Check, CloudSun, KeyRound, ListRestart, MapPin, Save, Search, Server, Sparkles, TestTube2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -20,10 +20,20 @@ interface ApiSettings {
   amapApiKey: string;
   amapServiceKey: string;
   amapJsUrl: string;
+  webSearchProvider: string;
+  webSearchApiKey: string;
+  webSearchBaseUrl: string;
   backendBaseUrl: string;
 }
 
 const storageKey = "ai-travel-api-settings";
+const webSearchBaseUrls: Record<string, string> = {
+  baidu: "https://qianfan.baidubce.com/v2/ai_search/web_search",
+  duckduckgo: "https://duckduckgo.com/html/",
+  bing: "https://www.bing.com/search",
+  brave: "https://api.search.brave.com/res/v1/web/search",
+  tavily: "https://api.tavily.com/search",
+};
 
 const defaultSettings: ApiSettings = {
   llmProvider: "openai-compatible",
@@ -37,6 +47,9 @@ const defaultSettings: ApiSettings = {
   amapApiKey: "",
   amapServiceKey: "",
   amapJsUrl: "https://webapi.amap.com/maps?v=2.0&key={key}",
+  webSearchProvider: "baidu",
+  webSearchApiKey: "",
+  webSearchBaseUrl: "https://qianfan.baidubce.com/v2/ai_search/web_search",
   backendBaseUrl: "http://127.0.0.1:8001",
 };
 
@@ -77,6 +90,9 @@ const toPayload = (settings: ApiSettings) => ({
   amap_api_key: settings.amapApiKey,
   amap_service_key: settings.amapServiceKey || settings.amapApiKey,
   amap_js_url: settings.amapJsUrl,
+  web_search_provider: settings.webSearchProvider,
+  web_search_api_key: settings.webSearchApiKey,
+  web_search_base_url: settings.webSearchBaseUrl,
   backend_base_url: settings.backendBaseUrl,
 });
 
@@ -109,6 +125,17 @@ export function PreferencesPage() {
     }));
   };
 
+  const selectWebSearchProvider = (provider: string) => {
+    setSaved(false);
+    setTestState("未测试");
+    setChecks([]);
+    setSettings((current) => ({
+      ...current,
+      webSearchProvider: provider,
+      webSearchBaseUrl: webSearchBaseUrls[provider] ?? current.webSearchBaseUrl,
+    }));
+  };
+
   const save = () => {
     localStorage.setItem(storageKey, JSON.stringify(settings));
     setSaved(true);
@@ -137,7 +164,7 @@ export function PreferencesPage() {
       const list = await fetchProviderModels(toPayload(settings));
       setModels(list.slice(0, 12));
       if (list.length && !settings.llmModel) update("llmModel", list[0]);
-      setModelState(list.length ? `已获取 ${list.length} 个模型` : "没有返回模型");
+      setModelState(list.length ? `返回 ${list.length} 个模型` : "没有返回模型");
     } catch {
       setModelState("获取失败");
     }
@@ -147,6 +174,7 @@ export function PreferencesPage() {
     { title: "LLM", value: settings.llmModel || "未选择模型", status: settings.llmApiKey ? "connected" : "missing", icon: Sparkles },
     { title: "和风天气", value: maskKey(settings.qweatherApiKey), status: settings.qweatherApiKey ? "connected" : "missing", icon: CloudSun },
     { title: "高德地图", value: maskKey(settings.amapApiKey), status: settings.amapApiKey ? "connected" : "missing", icon: MapPin },
+    { title: "百度搜索", value: maskKey(settings.webSearchApiKey), status: settings.webSearchApiKey ? "connected" : "missing", icon: Search },
     { title: "FastAPI", value: settings.backendBaseUrl, status: "local", icon: Server },
   ];
   const modelOptions = Array.from(new Set([settings.llmModel, ...models].filter(Boolean)));
@@ -157,7 +185,7 @@ export function PreferencesPage() {
         <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h1 className="text-4xl font-black tracking-normal text-slate-950">服务配置</h1>
-            <div className="mt-3 text-sm font-medium text-slate-500">LLM、天气、地图、本地后端</div>
+            <div className="mt-3 text-sm font-medium text-slate-500">LLM、天气、地图、搜索、本地后端</div>
           </div>
           <div className="flex flex-wrap gap-3">
             <Button variant="outline" onClick={testConnection} className="h-12 rounded-xl px-6 text-[#0da8ad]">
@@ -171,7 +199,7 @@ export function PreferencesPage() {
           </div>
         </div>
 
-        <div className="mb-6 grid gap-4 lg:grid-cols-4">
+        <div className="mb-6 grid gap-4 lg:grid-cols-5">
           {cards.map((card) => {
             const Icon = card.icon;
             const active = card.status !== "missing";
@@ -261,6 +289,32 @@ export function PreferencesPage() {
                 <Field label="JS API URL" value={settings.amapJsUrl} onChange={(value) => update("amapJsUrl", value)} />
               </div>
             </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="mb-5 flex items-center gap-3">
+                <Search className="h-5 w-5 text-[#0da8ad]" />
+                <h2 className="text-xl font-black">百度搜索</h2>
+              </div>
+              <div className="grid gap-4">
+                <div>
+                  <div className="mb-2 text-sm font-bold text-slate-700">Provider</div>
+                  <Select value={settings.webSearchProvider} onValueChange={selectWebSearchProvider}>
+                    <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-white text-sm font-bold shadow-none focus:ring-[#10b8bd]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="baidu">百度千帆搜索</SelectItem>
+                      <SelectItem value="duckduckgo">DuckDuckGo</SelectItem>
+                      <SelectItem value="bing">Bing</SelectItem>
+                      <SelectItem value="brave">Brave</SelectItem>
+                      <SelectItem value="tavily">Tavily</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Field label="API URL" value={settings.webSearchBaseUrl} onChange={(value) => update("webSearchBaseUrl", value)} />
+                <Field label="API Key" type="password" value={settings.webSearchApiKey} onChange={(value) => update("webSearchApiKey", value)} />
+              </div>
+            </section>
           </div>
 
           <aside className="space-y-6">
@@ -275,6 +329,7 @@ export function PreferencesPage() {
                   ["和风天气 Key", settings.qweatherApiKey],
                   ["高德 API Key", settings.amapApiKey],
                   ["高德服务 Key", settings.amapServiceKey || settings.amapApiKey],
+                  ["百度搜索 Key", settings.webSearchApiKey],
                   ["后端地址", settings.backendBaseUrl],
                 ].map(([label, value]) => (
                   <div key={label} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">

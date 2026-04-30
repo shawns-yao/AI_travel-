@@ -5,6 +5,7 @@ import time
 from app.core.agent import BaseAgent, AgentResult
 from app.core.logging import get_logger, log_agent_start, log_agent_done
 from app.core.tool import tool_registry
+from app.services.destination_resolver import resolve_destination
 
 logger = get_logger("weather_agent")
 
@@ -24,13 +25,15 @@ class WeatherAgent(BaseAgent):
         try:
             intent = context.get("IntentAgent", {})
             destination = intent.get("destination", "")
+            resolved = resolve_destination(destination)
+            weather_city = resolved.weather_city
             all_dates = intent.get("all_dates", "")
             dates = [d.strip() for d in all_dates.split(",") if d.strip()] if all_dates else []
 
             # 天气属于确定性外部信息，不能让 LLM “看心情”决定是否调工具。
             location_tool = tool_registry.get("get_location_id")
             weather_tool = tool_registry.get("get_weather_by_location_id")
-            location_id = await location_tool.execute(address=destination)
+            location_id = await location_tool.execute(address=weather_city)
             emit_event = context.get("emit_event")
             if callable(emit_event):
                 emit_event(
@@ -38,8 +41,9 @@ class WeatherAgent(BaseAgent):
                     agent_name=self.name,
                     tool_name="get_location_id",
                     success=True,
-                    summary=f"定位到 {destination}",
-                    output={"destination": destination, "location_id": location_id},
+                    destination=destination,
+                    summary=f"{destination} 按 {weather_city} 查询天气",
+                    output={"destination": destination, "weather_city": weather_city, "location_id": location_id},
                 )
             parsed = await weather_tool.execute(locationId=location_id, dates=dates)
             parsed = self._normalize_forecast(parsed, dates)
@@ -49,8 +53,9 @@ class WeatherAgent(BaseAgent):
                     agent_name=self.name,
                     tool_name="get_weather_by_location_id",
                     success=True,
+                    destination=destination,
                     summary=f"获取 {len(parsed)} 天游玩天气",
-                    output={"forecast": parsed[:3], "source": parsed[0].get("source") if parsed else ""},
+                    output={"destination": destination, "weather_city": weather_city, "forecast": parsed[:3], "source": parsed[0].get("source") if parsed else ""},
                 )
 
             risk_levels = [d.get("risk_level", "LOW") for d in parsed]
@@ -71,10 +76,12 @@ class WeatherAgent(BaseAgent):
                 output={
                     "forecast": parsed,
                     "risk_analysis": risk_analysis,
+                    "weather_city": weather_city,
+                    "destination": destination,
                 },
                 duration_ms=duration_ms,
                 tool_calls=[
-                    {"tool": "get_location_id", "args": {"address": destination}},
+                    {"tool": "get_location_id", "args": {"address": weather_city}},
                     {"tool": "get_weather_by_location_id", "args": {"locationId": location_id, "dates": dates}},
                 ],
             )

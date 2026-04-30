@@ -83,6 +83,17 @@ class AmapGeocodeTool(BaseTool):
 
     @staticmethod
     def _fallback_geocode(address: str) -> dict[str, Any]:
+        if "鼓浪屿" in address:
+            return {
+                "formatted_address": address or "鼓浪屿",
+                "province": "福建省",
+                "city": "厦门",
+                "district": "思明区",
+                "adcode": "",
+                "location": {"lng": 118.0676, "lat": 24.4446},
+                "source": "fallback",
+            }
+
         presets = {
             "北京": {"lng": 116.4074, "lat": 39.9042},
             "上海": {"lng": 121.4737, "lat": 31.2304},
@@ -205,8 +216,9 @@ class AmapPOISearchTool(BaseTool):
 
     @staticmethod
     def _fallback_pois(city: str, keywords: str, limit: int) -> list[dict[str, Any]]:
-        center = AmapGeocodeTool._fallback_geocode(city)["location"]
         keyword = keywords or "景点"
+        label = "鼓浪屿" if "鼓浪屿" in keyword or "鼓浪屿" in city else city
+        center = AmapGeocodeTool._fallback_geocode(label or city)["location"]
         names = {
             "美食": ["高评分本地菜餐厅", "老字号主题餐厅", "景区周边品质餐厅", "城市地标餐厅"],
             "餐饮": ["高评分本地菜餐厅", "老字号主题餐厅", "景区周边品质餐厅", "城市地标餐厅"],
@@ -214,13 +226,28 @@ class AmapPOISearchTool(BaseTool):
             "酒店": ["市中心舒适酒店", "交通便利酒店", "景区周边酒店", "高评分民宿"],
             "景点": ["城市核心景区", "历史文化街区", "城市公园", "博物馆"],
         }
-        selected = next((v for k, v in names.items() if k in keyword), names["景点"])
+        if label == "鼓浪屿":
+            names.update({
+                "美食": ["高评分闽南菜餐厅", "海景餐厅", "老字号小吃集合店", "咖啡甜品店"],
+                "餐饮": ["高评分闽南菜餐厅", "海景餐厅", "老字号小吃集合店", "咖啡甜品店"],
+                "餐厅": ["高评分闽南菜餐厅", "海景餐厅", "老字号小吃集合店", "咖啡甜品店"],
+                "酒店": ["岛上精品酒店", "码头周边酒店", "海景民宿", "老别墅酒店"],
+                "景点": ["日光岩", "菽庄花园", "皓月园", "风琴博物馆"],
+            })
+            exact_spots = ["鼓浪屿风景名胜区", "港仔后沙滩", "鼓浪屿沙滩", "皓月园", "长寿园", "中国电影音乐馆"]
+            matched_spot = next((spot for spot in exact_spots if spot in keyword), "")
+            if matched_spot:
+                selected = [matched_spot]
+            else:
+                selected = next((v for k, v in names.items() if k in keyword), names["景点"])
+        else:
+            selected = next((v for k, v in names.items() if k in keyword), names["景点"])
         pois: list[dict[str, Any]] = []
         for index, name in enumerate(selected[:limit], start=1):
             pois.append(
                 {
                     "id": f"fallback_{index}",
-                    "name": f"{city}{name}" if city else name,
+                    "name": f"{label}{name}" if label and label not in name else name,
                     "type": keyword,
                     "typecode": "",
                     "address": city,

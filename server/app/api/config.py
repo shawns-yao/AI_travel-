@@ -29,6 +29,9 @@ class ApiSettingsPayload(BaseModel):
     amap_api_key: str = ""
     amap_service_key: str = ""
     amap_js_url: str = "https://webapi.amap.com/maps?v=2.0&key={key}"
+    web_search_provider: str = "baidu"
+    web_search_api_key: str = ""
+    web_search_base_url: str = "https://qianfan.baidubce.com/v2/ai_search/web_search"
     backend_base_url: str = ""
 
 
@@ -192,6 +195,40 @@ async def _test_amap_service(payload: ApiSettingsPayload) -> ConfigCheck:
         return ConfigCheck(name="高德服务", ok=False, message=str(exc))
 
 
+async def _test_web_search(payload: ApiSettingsPayload) -> ConfigCheck:
+    provider = _clean_text(payload.web_search_provider or "baidu")
+    if provider == "disabled":
+        return ConfigCheck(name="百度搜索", ok=False, message="未启用")
+    if provider == "baidu" and not payload.web_search_api_key:
+        return ConfigCheck(name="百度搜索", ok=False, message="缺少 API Key")
+    try:
+        if provider == "baidu":
+            url = _clean_text(payload.web_search_base_url or "https://qianfan.baidubce.com/v2/ai_search/web_search")
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.post(
+                    url,
+                    json={
+                        "messages": [{"role": "user", "content": "鼓浪屿 船票 攻略"}],
+                        "edition": "lite",
+                        "search_source": "baidu_search_v2",
+                        "resource_type_filter": [{"type": "web", "top_k": 3}],
+                        "safe_search": True,
+                    },
+                    headers={
+                        "Authorization": f"Bearer {payload.web_search_api_key}",
+                        "X-Appbuilder-Authorization": f"Bearer {payload.web_search_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                )
+                data = response.json()
+            if response.status_code < 400 and isinstance(data.get("references"), list):
+                return ConfigCheck(name="百度搜索", ok=True, message=f"返回 {len(data.get('references', []))} 条")
+            return ConfigCheck(name="百度搜索", ok=False, message=str(data.get("message") or data.get("code") or f"HTTP {response.status_code}"))
+        return ConfigCheck(name="联网搜索", ok=True, message=f"{provider} 已选择")
+    except Exception as exc:
+        return ConfigCheck(name="百度搜索" if provider == "baidu" else "联网搜索", ok=False, message=str(exc))
+
+
 @router.post("/models", response_model=ModelListResponse)
 async def list_models(payload: ApiSettingsPayload) -> ModelListResponse:
     return ModelListResponse(models=await _fetch_models(payload))
@@ -217,5 +254,6 @@ async def test_config(payload: ApiSettingsPayload) -> ConfigTestResponse:
     checks.append(await _test_qweather(payload))
     checks.append(await _test_amap(payload))
     checks.append(await _test_amap_service(payload))
+    checks.append(await _test_web_search(payload))
     status = "ok" if all(item.ok for item in checks) else "partial"
     return ConfigTestResponse(status=status, checks=checks, models=models[:12])

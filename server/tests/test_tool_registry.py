@@ -3,6 +3,7 @@ import pytest
 from app.core.tool import ToolRegistry, BaseTool, ToolResult, tool_registry
 from app.core.exceptions import ToolNotFoundError
 from app.tools.amap_tool import AmapGeocodeTool, AmapPOISearchTool, AmapRoutePlanningTool
+from app.tools.web_search_tool import MCPWebSearchTool
 
 
 # ── Test tool implementations ───────────────────────────────
@@ -137,6 +138,7 @@ class TestAmapTools:
         assert AmapGeocodeTool().schema.name == "amap_geocode"
         assert AmapPOISearchTool().schema.name == "amap_search_poi"
         assert AmapRoutePlanningTool().schema.name == "amap_route_planning"
+        assert MCPWebSearchTool().schema.name == "mcp_web_search"
 
     async def test_amap_tools_fallback_without_key(self, monkeypatch):
         monkeypatch.setattr("app.core.config.settings.amap_api_key", "")

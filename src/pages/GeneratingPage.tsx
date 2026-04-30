@@ -59,8 +59,10 @@ const budgetLabels: Record<string, string> = {
 
 const budgetSummary = (output?: Record<string, unknown>) => {
   const allocated = output?.allocated;
+  if (output?.budget_source !== "user" && output?.estimated !== false) return "";
   if (!allocated || typeof allocated !== "object") return "";
   return Object.entries(allocated as Record<string, unknown>)
+    .filter(([, value]) => Number(value) > 0)
     .slice(0, 4)
     .map(([key, value]) => `${budgetLabels[key] ?? key} ¥${Math.round(Number(value) || 0)}`)
     .join(" · ");
@@ -76,18 +78,33 @@ const routeSummary = (output?: Record<string, unknown>) => {
   return names.join(" → ");
 };
 
-const latestToolItems = (events: SSERunEvent[], category: string, limit = 3) => {
+const normalizePlace = (value: string) =>
+  value
+    .replace(/[（）()]/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+
+const sameDestination = (event: SSERunEvent, destination: string) => {
+  const output = event.data.output as Record<string, unknown> | undefined;
+  const eventDestination = String(event.data.destination || output?.destination || "");
+  if (!eventDestination) return true;
+  const current = normalizePlace(destination);
+  const incoming = normalizePlace(eventDestination);
+  return incoming.includes(current) || current.includes(incoming);
+};
+
+const latestToolItems = (events: SSERunEvent[], category: string, destination: string, limit = 3) => {
   const event = [...events]
     .reverse()
-    .find((item) => item.type === "tool.completed" && item.data.category === category);
+    .find((item) => item.type === "tool.completed" && item.data.category === category && sameDestination(item, destination));
   const output = event?.data.output as Record<string, unknown> | undefined;
   return listNames(output?.items, limit);
 };
 
-const latestToolPois = (events: SSERunEvent[], category: string, limit = 5): POI[] => {
+const latestToolPois = (events: SSERunEvent[], category: string, destination: string, limit = 5): POI[] => {
   const event = [...events]
     .reverse()
-    .find((item) => item.type === "tool.completed" && item.data.category === category);
+    .find((item) => item.type === "tool.completed" && item.data.category === category && sameDestination(item, destination));
   const output = event?.data.output as Record<string, unknown> | undefined;
   const items = output?.items;
   if (!Array.isArray(items)) return [];
@@ -96,29 +113,25 @@ const latestToolPois = (events: SSERunEvent[], category: string, limit = 5): POI
     .slice(0, limit);
 };
 
-const latestToolSummary = (events: SSERunEvent[]) =>
-  events
-    .filter((event) => event.type === "tool.completed" || event.type === "memory.hit")
-    .slice(-5)
-    .map((event) => String(event.data.summary || event.data.tool_name || event.type))
-    .filter(Boolean);
-
 export function GeneratingPage({ events, query }: GeneratingPageProps) {
-  const completedAgents = events.filter((event) => event.type === "agent.completed").length;
-  const completed = Math.min(completedAgents + 1, steps.length);
+  const hasFinalResult = events.some((event) => event.type === "run.completed" && event.data.result);
+  const completedAgents = new Set(
+    events
+      .filter((event) => event.type === "agent.completed" && event.data.agent_name)
+      .map((event) => String(event.data.agent_name)),
+  ).size;
+  const completed = hasFinalResult ? steps.length : Math.min(completedAgents + 1, steps.length - 1);
   const progress = Math.round((completed / steps.length) * 100);
   const destination = deriveDestination(query);
   const duration = deriveDuration(query);
   const plannerOutput = agentOutput(events, "PlannerAgent");
   const budgetOutput = agentOutput(events, "BudgetAgent");
   const hotels = listNames(plannerOutput?.hotels, 3);
-  const liveHotels = hotels.length ? hotels : latestToolItems(events, "酒店", 3);
-  const liveAttractions = latestToolItems(events, "景点", 4);
-  const liveAttractionPois = latestToolPois(events, "景点", 5);
-  const liveFood = latestToolItems(events, "餐饮", 1);
+  const liveHotels = hotels.length ? hotels : latestToolItems(events, "酒店", destination, 3);
+  const liveAttractions = latestToolItems(events, "景点", destination, 4);
+  const liveAttractionPois = latestToolPois(events, "景点", destination, 5);
   const budgetText = budgetSummary(budgetOutput);
   const routeText = routeSummary(plannerOutput);
-  const toolSummaries = latestToolSummary(events);
   const liveCards = [
     {
       title: "住宿区域推荐",
@@ -144,8 +157,8 @@ export function GeneratingPage({ events, query }: GeneratingPageProps) {
           ? { city: destination, location: previewCenter, source: "amap" }
           : { city: destination, source: "amap" },
         attractions: liveAttractionPois,
-        food: latestToolPois(events, "餐饮", 3),
-        hotels: latestToolPois(events, "酒店", 3),
+        food: latestToolPois(events, "餐饮", destination, 3),
+        hotels: latestToolPois(events, "酒店", destination, 3),
         routes: [],
       }
     : null;
@@ -193,46 +206,20 @@ export function GeneratingPage({ events, query }: GeneratingPageProps) {
             </div>
           </div>
 
-          <div className="relative overflow-hidden rounded-2xl">
-              <RouteMap mapData={previewMapData} previewLabel="推荐路线" />
-          </div>
-        </div>
+          <div className="space-y-4">
+            <div className="relative overflow-hidden rounded-2xl">
+              <RouteMap mapData={previewMapData} previewLabel="推荐路线" heightClass="min-h-[460px]" />
+            </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
-          {liveCards.map((card, index) => (
-            <div key={card.title} className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm">
-              <div className="mb-5 text-lg font-black">{card.title}</div>
-              <div className="space-y-3">
-                <div className={`flex min-h-24 items-center rounded-xl px-5 text-sm font-semibold leading-7 ${card.value ? "bg-cyan-50 text-slate-700" : index === 1 ? "bg-[conic-gradient(from_160deg,#8fe7e7,#eef6f7,#b7edf0,#eef6f7)] text-slate-500" : "bg-gradient-to-r from-cyan-50 to-slate-50 text-slate-500"}`}>
-                  {card.value || card.fallback}
+            <div className="grid gap-4 lg:grid-cols-3">
+              {liveCards.map((card) => (
+                <div key={card.title} className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm">
+                  <div className="mb-3 text-base font-black">{card.title}</div>
+                  <div className={`flex min-h-20 items-center rounded-xl px-4 text-sm font-semibold leading-7 ${card.value ? "bg-cyan-50 text-slate-700" : "bg-gradient-to-r from-cyan-50 to-slate-50 text-slate-500"}`}>
+                    {card.value || card.fallback}
+                  </div>
                 </div>
-                <div className={`h-3 rounded ${card.value ? "bg-[#10b8bd]/25" : "bg-slate-100"}`} />
-                <div className={`h-3 w-4/5 rounded ${card.value ? "bg-[#10b8bd]/15" : "bg-slate-100"}`} />
-                <div className={`pt-1 text-sm font-medium ${card.value ? "text-[#0da8ad]" : "text-slate-400"}`}>
-                  {card.value ? "已获取，正在合成方案" : card.fallback}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-6 rounded-2xl border border-slate-200 bg-white/92 p-5 shadow-sm">
-          <div className="mb-4 flex items-center justify-between">
-            <div className="text-lg font-black">实时检索结果</div>
-            <div className="text-sm font-bold text-[#0da8ad]">{toolSummaries.length ? "已接入工具链" : "等待工具返回"}</div>
-          </div>
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="rounded-xl bg-cyan-50 p-4">
-              <div className="mb-2 text-sm font-black text-slate-500">景点</div>
-              <div className="text-sm font-semibold leading-7 text-slate-700">{liveAttractions.join("、") || "检索中"}</div>
-            </div>
-            <div className="rounded-xl bg-slate-50 p-4">
-              <div className="mb-2 text-sm font-black text-slate-500">餐饮</div>
-              <div className="text-sm font-semibold leading-7 text-slate-700">{liveFood.join("、") || "检索中"}</div>
-            </div>
-            <div className="rounded-xl bg-slate-50 p-4">
-              <div className="mb-2 text-sm font-black text-slate-500">执行事件</div>
-              <div className="text-sm font-semibold leading-7 text-slate-700">{toolSummaries.join(" · ") || "Agent 正在启动"}</div>
+              ))}
             </div>
           </div>
         </div>

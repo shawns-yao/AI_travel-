@@ -39,13 +39,19 @@ async def get_run(run_id: str):
         raise HTTPException(status_code=404, detail="Run not found")
 
     output = status.get("output", {})
-    completed_agents = list(output.keys()) if output else []
+    events = status.get("events", [])
+    completed_agents = [
+        str(event.get("data", {}).get("agent_name"))
+        for event in events
+        if event.get("type") == "agent.completed" and event.get("data", {}).get("success") is True
+    ]
 
     return RunStatusResponse(
         run_id=run_id,
         status=status.get("status", "unknown"),
-        completed_agents=completed_agents,
+        completed_agents=list(dict.fromkeys(completed_agents)),
         events_count=len(status.get("events", [])),
+        result=output or None,
     )
 
 

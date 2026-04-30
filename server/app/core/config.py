@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     amap_security_js_code: str = ""
     amap_base_url: str = "https://restapi.amap.com"
 
+    # Web search / MCP-style external context provider.
+    web_search_provider: str = "baidu"
+    web_search_api_key: str = ""
+    web_search_base_url: str = "https://qianfan.baidubce.com/v2/ai_search/web_search"
+
     # LLM provider
     llm_provider: str = "openai-compatible"
     llm_api_key: str = ""

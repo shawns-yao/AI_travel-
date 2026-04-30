@@ -37,10 +37,13 @@ export interface TravelPlanResult {
   created_at?: string;
   updated_at?: string;
   status?: string;
+  plan_variant?: string;
+  variant_profile?: VariantProfile;
   destination: string;
   duration: number;
   start_date: string;
   budget: number;
+  budget_source?: "user" | "estimated";
   preferences: string[];
   weather: WeatherResult | null;
   daily_plans: DailyPlan[];
@@ -53,6 +56,8 @@ export interface TravelPlanResult {
 export interface WeatherResult {
   forecast: DailyWeather[];
   risk_analysis: string;
+  weather_city?: string;
+  destination?: string;
 }
 
 export interface DailyWeather {
@@ -85,6 +90,7 @@ export interface Activity {
   cost: number;
   source?: string; // RAG citation
   coordinate?: Coordinate | null;
+  photo?: string;
 }
 
 export interface Meal {
@@ -97,6 +103,7 @@ export interface Meal {
   cost: number;
   source?: string;
   coordinate?: Coordinate | null;
+  photo?: string;
 }
 
 export interface Coordinate {
@@ -106,6 +113,15 @@ export interface Coordinate {
 
 export interface MapData {
   destination: string;
+  display_destination?: string;
+  resolved_city?: string;
+  weather_city?: string;
+  required_focus?: string;
+  travel_tips?: TravelTips;
+  guide_context?: GuideContext;
+  spot_notes?: SpotNote[];
+  route_advice?: string[];
+  variant_profile?: VariantProfile;
   center: {
     formatted_address?: string;
     city?: string;
@@ -116,6 +132,49 @@ export interface MapData {
   food: POI[];
   hotels: POI[];
   routes: RouteSummary[];
+}
+
+export interface TravelTips {
+  pre_trip: string[];
+  food: string[];
+  hotel: string[];
+  avoidance: string[];
+  backup: string[];
+}
+
+export interface SpotNote {
+  name: string;
+  highlight: string;
+  tip: string;
+  poi_id?: string;
+  address?: string;
+  location?: Coordinate | null;
+  guide?: string;
+  source?: string;
+}
+
+export interface VariantProfile {
+  name: string;
+  pace: string;
+  transport: string;
+  hotel: string;
+  daily_spots: number;
+  budget_strategy: string;
+  strategy_tags: string[];
+}
+
+export interface GuideContext {
+  sources: GuideSource[];
+  highlights: string[];
+  web_snippets: string[];
+}
+
+export interface GuideSource {
+  title: string;
+  url: string;
+  snippet: string;
+  source: string;
+  image?: string;
 }
 
 export interface POI {
@@ -142,6 +201,8 @@ export interface RouteSummary {
 
 export interface BudgetBreakdown {
   total_budget: number;
+  budget_source?: "user" | "estimated";
+  estimated?: boolean;
   allocated: Record<string, number>;
   spent: number;
   warnings: string[];

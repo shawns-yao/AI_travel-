@@ -31,3 +31,4 @@ class RunStatusResponse(BaseModel):
     completed_agents: list[str] = []
     failed_agents: list[str] = []
     events_count: int = 0
+    result: dict | None = None

@@ -461,6 +461,7 @@ def build_travel_dag(
             "MemoryAgent",
             "WeatherAgent",
             "BudgetAgent",
+            "GuideAgent",
             "PlannerAgent",
             "CriticAgent",
         ]
@@ -475,7 +476,7 @@ def build_travel_dag(
         node_map["IntentAgent"] = n
 
     # Parallel agents: depend on IntentAgent
-    parallel_agents = ["MemoryAgent", "WeatherAgent"]
+    parallel_agents = ["MemoryAgent", "WeatherAgent", "GuideAgent"]
     for name in parallel_agents:
         if name in agent_names:
             deps = ["IntentAgent"] if "IntentAgent" in node_map else []
@@ -493,7 +494,7 @@ def build_travel_dag(
 
     # PlannerAgent: depends on BudgetAgent and available context
     if "PlannerAgent" in agent_names:
-        deps = [name for name in ["IntentAgent", "BudgetAgent", "WeatherAgent", "MemoryAgent"] if name in node_map]
+        deps = [name for name in ["IntentAgent", "BudgetAgent", "WeatherAgent", "MemoryAgent", "GuideAgent"] if name in node_map]
         n = DAGNode(
             agent_name="PlannerAgent",
             node_id="PlannerAgent",

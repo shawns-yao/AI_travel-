@@ -1,4 +1,4 @@
-import { ComponentType, useState } from "react";
+import { ComponentType, useEffect, useState } from "react";
 import { Calendar, MapPin, Sparkles, Users, Wallet, Utensils, Mountain, Footprints, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,27 +51,59 @@ const cityNames = [
   "西宁", "拉萨", "乌鲁木齐", "桂林", "南宁", "福州", "泉州", "宁波", "无锡", "扬州", "黄山", "婺源", "张家界",
 ];
 
+const placeNames = ["鼓浪屿", ...cityNames];
 const cnNumbers: Record<string, string> = { 一: "1", 二: "2", 两: "2", 三: "3", 四: "4", 五: "5", 六: "6", 七: "7", 八: "8", 九: "9", 十: "10" };
+
+const nextHolidayDate = (month: number, day: number) => {
+  const now = new Date();
+  let year = now.getFullYear();
+  const cutoff = new Date(year, month - 1, day + 7);
+  if (now > cutoff) year += 1;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+};
+
+const cleanPlace = (value: string) =>
+  value
+    .replace(/^(去|到|玩|游|主要|重点|主打|核心|最想|必须|一定)+/, "")
+    .replace(/[玩旅游旅行出行度假]/g, "")
+    .trim();
+
+const findKnownPlace = (value: string) => placeNames.find((name) => value.includes(name));
 
 const parseTripQuery = (text: string) => {
   const patch: Partial<{ departure: string; destination: string; startDate: string; duration: string; people: string; budget: string }> = {};
+  const routeMatch = text.match(/([^，,。.；;\s（）()]+)\s*(?:-|—|–|到|至|→)\s*([^，,。.；;\s（）()]+)(?:[（(]|，|,|。|；|;|\s|$)/);
+  if (routeMatch) {
+    const departure = findKnownPlace(routeMatch[1]) || cleanPlace(routeMatch[1]);
+    const destination = findKnownPlace(routeMatch[2]) || cleanPlace(routeMatch[2]);
+    if (departure) patch.departure = departure;
+    if (destination && destination !== departure) patch.destination = destination;
+  }
+
+  const focusMatch = text.match(/[（(][^）)]*(?:主要|重点|主打|核心|最想|必须|一定)(?:去|玩|游)?([^）)，,。.；;\s]+)[）)]/)
+    || text.match(/(?:主要|重点|主打|核心|最想|必须|一定)(?:去|玩|游)?([^，,。.；;\s）)]+)/);
+  if (focusMatch?.[1]) {
+    const focused = findKnownPlace(focusMatch[1]) || cleanPlace(focusMatch[1]);
+    if (focused) patch.destination = focused;
+  }
+
   const destinationMatch = text.match(/(?:去|到)([^，,。.；;\s]+?)(?:玩|旅游|旅行|出行|度假|三天|两天|一天|\d+\s*天|[一二两三四五六七八九十]天|$)/);
-  if (destinationMatch?.[1]) {
-    const city = cityNames.find((name) => destinationMatch[1].includes(name)) || destinationMatch[1];
-    patch.destination = city.replace(/[玩旅游旅行出行度假]/g, "");
-  } else {
-    const city = cityNames.find((name) => text.includes(name));
+  if (!patch.destination && destinationMatch?.[1]) {
+    const city = findKnownPlace(destinationMatch[1]) || destinationMatch[1];
+    patch.destination = cleanPlace(city);
+  } else if (!patch.destination) {
+    const city = placeNames.find((name) => text.includes(name));
     if (city) patch.destination = city;
   }
 
   const departureMatch = text.match(/(?:从|出发地[:：]?)([^，,。.；;\s]+?)(?:出发|到|去|$)/);
   if (departureMatch?.[1]) {
-    const city = cityNames.find((name) => departureMatch[1].includes(name)) || departureMatch[1];
+    const city = findKnownPlace(departureMatch[1]) || departureMatch[1];
     if (city && city !== patch.destination) patch.departure = city;
   }
 
-  const digitDays = text.match(/(\d+)\s*天/);
-  const cnDays = Object.entries(cnNumbers).find(([word]) => text.includes(`${word}天`));
+  const digitDays = text.match(/(\d+)\s*[天日]/);
+  const cnDays = Object.entries(cnNumbers).find(([word]) => text.includes(`${word}天`) || text.includes(`${word}日`));
   if (digitDays?.[1]) patch.duration = digitDays[1];
   else if (cnDays) patch.duration = cnDays[1];
 
@@ -95,6 +127,8 @@ const parseTripQuery = (text: string) => {
   if (dateMatch) {
     const [, year, month, day] = dateMatch;
     patch.startDate = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  } else if (/五一|劳动节/.test(text)) {
+    patch.startDate = nextHolidayDate(5, 1);
   }
 
   return patch;
@@ -106,9 +140,17 @@ export function HomePage({ query, isRunning, onQueryChange, onSubmit, onQuickPla
     destination: "杭州",
     startDate: "",
     duration: "3",
-    people: "2",
-    budget: "4000",
+    people: "1",
+    budget: "",
   });
+
+  useEffect(() => {
+    if (!query.trim()) return;
+    const patch = parseTripQuery(query);
+    if (Object.keys(patch).length) {
+      setDraft((current) => ({ ...current, ...patch }));
+    }
+  }, [query]);
 
   const updateDraft = (key: keyof typeof draft, value: string) => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -130,7 +172,7 @@ export function HomePage({ query, isRunning, onQueryChange, onSubmit, onQuickPla
       draft.startDate ? `出发日期：${draft.startDate}` : "",
       draft.duration ? `天数：${draft.duration}天` : "",
       draft.people ? `人数：${draft.people}人` : "",
-      draft.budget ? `预算：${draft.budget}元` : "",
+      draft.budget ? `预算：${draft.budget}元` : "预算：未填写，请根据目的地、人数和天数估算",
     ].filter(Boolean).join("，");
 
   const submit = () => onSubmit(composeQuery());
@@ -172,7 +214,7 @@ export function HomePage({ query, isRunning, onQueryChange, onSubmit, onQuickPla
           <FilterField label="日期" icon={Calendar} type="date" value={draft.startDate} onChange={(value) => updateDraft("startDate", value)} />
           <FilterField label="天数" icon={Calendar} value={draft.duration} suffix="天" onChange={(value) => updateDraft("duration", value.replace(/\D/g, ""))} />
           <FilterField label="人数" icon={Users} value={draft.people} suffix="人" onChange={(value) => updateDraft("people", value.replace(/\D/g, ""))} />
-          <FilterField label="预算" icon={Wallet} value={draft.budget} suffix="元" onChange={(value) => updateDraft("budget", value.replace(/\D/g, ""))} />
+          <FilterField label="预算" icon={Wallet} value={draft.budget} suffix="元" placeholder="可不填" onChange={(value) => updateDraft("budget", value.replace(/\D/g, ""))} />
         </div>
 
         <div className="mx-auto mt-5 flex max-w-4xl flex-wrap justify-center gap-3">
@@ -232,10 +274,11 @@ interface FilterFieldProps {
   icon: ComponentType<{ className?: string }>;
   type?: string;
   suffix?: string;
+  placeholder?: string;
   onChange: (value: string) => void;
 }
 
-function FilterField({ label, value, icon: Icon, type = "text", suffix, onChange }: FilterFieldProps) {
+function FilterField({ label, value, icon: Icon, type = "text", suffix, placeholder, onChange }: FilterFieldProps) {
   return (
     <label className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition focus-within:border-[#10b8bd]">
       <span className="flex items-center gap-2 text-xs font-medium text-slate-500">
@@ -246,6 +289,7 @@ function FilterField({ label, value, icon: Icon, type = "text", suffix, onChange
         <Input
           type={type}
           value={value}
+          placeholder={placeholder}
           onChange={(event) => onChange(event.target.value)}
           className="h-7 border-0 bg-transparent p-0 text-base font-black text-slate-950 shadow-none focus-visible:ring-0"
         />

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Archive, Calendar, CheckCircle2, Download, Edit3, Plus, Share2, Trash2, Users, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TravelPlanResult } from "@/types";
+import { isTransferActivity } from "@/lib/travelActivities";
 
 interface PlansPageProps {
   plans: TravelPlanResult[];
@@ -78,7 +79,7 @@ export function PlansPage({ plans, onNew, onOpenPlan, onDelete }: PlansPageProps
       date: formatDate(plan),
       people: inferPeopleCount(plan),
       budget: `¥${plan.budget || 0}`,
-      desc: (plan.daily_plans?.[0]?.activities ?? []).slice(0, 2).map((item) => item.name).join("、") || "城市轻松游",
+      desc: (plan.daily_plans?.[0]?.activities ?? []).filter((item) => !isTransferActivity(item)).slice(0, 2).map((item) => item.name).join("、") || "城市轻松游",
       status: "已生成" as PlanStatus,
       image: Object.values(images)[index % Object.values(images).length],
     }));

@@ -24,6 +24,9 @@ export interface ApiSettingsPayload {
   amap_api_key: string;
   amap_service_key: string;
   amap_js_url: string;
+  web_search_provider: string;
+  web_search_api_key: string;
+  web_search_base_url: string;
   backend_base_url: string;
 }
 
@@ -37,6 +40,12 @@ export interface ConfigTestResponse {
   status: string;
   checks: ConfigCheck[];
   models: string[];
+}
+
+export interface RunStatusResponse {
+  run_id: string;
+  status: string;
+  result?: TravelPlanResult | null;
 }
 
 export const apiClient = axios.create({
@@ -63,6 +72,9 @@ const loadApiSettings = (): ApiSettingsPayload | null => {
       amap_api_key: parsed.amapApiKey || "",
       amap_service_key: parsed.amapServiceKey || parsed.amapApiKey || "",
       amap_js_url: parsed.amapJsUrl || "https://webapi.amap.com/maps?v=2.0&key={key}",
+      web_search_provider: parsed.webSearchProvider || "baidu",
+      web_search_api_key: parsed.webSearchApiKey || "",
+      web_search_base_url: parsed.webSearchBaseUrl || "https://qianfan.baidubce.com/v2/ai_search/web_search",
       backend_base_url: parsed.backendBaseUrl || "",
     };
   } catch {
@@ -84,6 +96,11 @@ export async function deleteSavedPlan(planId: string): Promise<void> {
   await apiClient.delete(`/plans/${planId}`);
 }
 
+export async function fetchRunStatus(runId: string): Promise<RunStatusResponse> {
+  const response = await apiClient.get<RunStatusResponse>(`/runs/${runId}`);
+  return response.data;
+}
+
 export async function testApiSettings(settings: ApiSettingsPayload): Promise<ConfigTestResponse> {
   const response = await apiClient.post<ConfigTestResponse>("/config/test", settings);
   return response.data;
@@ -103,6 +120,22 @@ export function subscribeRunEvents(
   },
 ): EventSource {
   const source = new EventSource(`/api/runs/${runId}/events`);
+  let settled = false;
+  let pollTimer: number | null = null;
+
+  const completeWithResult = (payload: Partial<RunCompletedPayload>) => {
+    if (!payload.result || settled) return false;
+    const result = {
+      ...payload.result,
+      id: payload.result.id || payload.plan_id || payload.result.source_run_id || runId,
+      source_run_id: payload.result.source_run_id || runId,
+    };
+    settled = true;
+    if (pollTimer) window.clearInterval(pollTimer);
+    handlers.onCompleted({ result, plan_id: payload.plan_id ?? result.id });
+    source.close();
+    return true;
+  };
 
   source.onmessage = (message) => {
     const event = JSON.parse(message.data) as SSERunEvent;
@@ -110,27 +143,66 @@ export function subscribeRunEvents(
 
     if (event.type === "run.completed") {
       const payload = event.data as unknown as Partial<RunCompletedPayload>;
-      if (payload.result) {
-        const result = {
-          ...payload.result,
-          id: payload.result.id || payload.plan_id || payload.result.source_run_id || runId,
-          source_run_id: payload.result.source_run_id || runId,
-        };
-        handlers.onCompleted({ result, plan_id: payload.plan_id ?? result.id });
-        source.close();
-      }
+      completeWithResult(payload);
     }
 
     if (event.type === "run.failed") {
       const error = typeof event.data.error === "string" ? event.data.error : "规划失败";
+      settled = true;
+      if (pollTimer) window.clearInterval(pollTimer);
       handlers.onFailed(error);
       source.close();
     }
   };
 
-  source.onerror = () => {
-    handlers.onFailed("SSE 连接中断");
+  pollTimer = window.setInterval(async () => {
+    if (settled) return;
+    try {
+      const status = await fetchRunStatus(runId);
+      if (status.status === "completed" && status.result) {
+        completeWithResult({ result: status.result, plan_id: status.result.id });
+      }
+      if (status.status === "failed") {
+        settled = true;
+        if (pollTimer) window.clearInterval(pollTimer);
+        handlers.onFailed("规划失败");
+        source.close();
+      }
+    } catch {
+      // SSE is still the primary channel; polling only prevents a completed run from being stranded.
+    }
+  }, 2500);
+
+  source.onerror = async () => {
+    if (settled) return;
     source.close();
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      try {
+        const status = await fetchRunStatus(runId);
+        if (status.status === "completed" && status.result) {
+          completeWithResult({ result: status.result, plan_id: status.result.id });
+          return;
+        }
+        if (status.status === "failed") {
+          settled = true;
+          if (pollTimer) window.clearInterval(pollTimer);
+          handlers.onFailed("规划失败");
+          return;
+        }
+      } catch {
+        // keep polling; the run result may not be committed yet
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1200));
+    }
+    settled = true;
+    if (pollTimer) window.clearInterval(pollTimer);
+    handlers.onFailed("规划结果连接中断，请在我的行程中查看是否已保存");
+  };
+
+  const originalClose = source.close.bind(source);
+  source.close = () => {
+    if (pollTimer) window.clearInterval(pollTimer);
+    originalClose();
   };
 
   return source;

@@ -1,72 +1,124 @@
-import { useMemo, useState } from "react";
-import { Bed, Bike, Bus, Clock, Edit3, RefreshCw, Save, Sparkles, Trash2, Utensils, Wallet } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Bed, Bike, Bus, Clock, Edit3, MapPin, RefreshCw, Save, Sparkles, Trash2, Utensils, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { TravelPlanResult } from "@/types";
+import { Activity, POI, TravelPlanResult } from "@/types";
+import { RouteMap } from "@/components/travel/RouteMap";
+import { PlaceDetailModal } from "@/components/travel/PlaceDetailModal";
+import { activityImage } from "@/lib/travelMedia";
+import { activityDescriptionForCard, isTransferActivity } from "@/lib/travelActivities";
 
 interface EditPlanPageProps {
   plan: TravelPlanResult;
   onSave: (plan: TravelPlanResult) => void;
   onOptimize: (query: string) => void;
+  initialChanges?: string[];
+  initialDay?: number;
 }
 
 const slots = [
   { label: "上午", time: "08:30 - 12:00", icon: Sparkles },
   { label: "下午", time: "13:30 - 16:30", icon: Sparkles },
   { label: "傍晚", time: "16:30 - 18:30", icon: Bed },
-  { label: "晚上", time: "18:30 - 20:30", icon: Utensils },
-];
-
-const images = [
-  "https://images.unsplash.com/photo-1596176530529-78163a4f7af2?auto=format&fit=crop&w=240&q=80",
-  "https://images.unsplash.com/photo-1543353071-873f17a7a088?auto=format&fit=crop&w=240&q=80",
-  "https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=240&q=80",
-  "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?auto=format&fit=crop&w=240&q=80",
+  { label: "晚上", time: "18:30 - 20:30", icon: Sparkles },
 ];
 
 const changeOptions = [
   ["这天太累了", Bike],
   ["少走路", Sparkles],
   ["换一个景点", Sparkles],
-  ["晚餐想吃火锅", Utensils],
   ["预算低一点", Wallet],
-  ["多加本地美食", Utensils],
 ] as const;
 
 const formatCost = (cost?: number) => {
-  if (!Number.isFinite(cost) || Number(cost) <= 0) return "费用待查";
+  if (!Number.isFinite(cost) || Number(cost) <= 0) return "";
   return `¥${Math.round(Number(cost))}`;
 };
 
-export function EditPlanPage({ plan, onSave, onOptimize }: EditPlanPageProps) {
-  const [selectedDay, setSelectedDay] = useState(0);
+const budgetLabels: Record<string, string> = {
+  transport: "交通",
+  accommodation: "住宿",
+  meals: "餐饮",
+  attractions: "景点门票",
+  shopping: "购物",
+  contingency: "机动",
+};
+
+const hasUserBudget = (plan: TravelPlanResult) =>
+  Number(plan.budget) > 0
+  && (plan.budget_source === "user" || plan.budget_breakdown?.budget_source === "user" || plan.budget_breakdown?.estimated === false);
+
+const budgetItems = (plan: TravelPlanResult) => {
+  if (!hasUserBudget(plan)) return [];
+  return Object.entries(plan.budget_breakdown?.allocated ?? {})
+    .filter(([, value]) => Number(value) > 0)
+    .slice(0, 4)
+    .map(([key, value]) => `${budgetLabels[key] ?? key} ¥${Math.round(Number(value) || 0)}`);
+};
+
+const foodItems = (plan: TravelPlanResult) =>
+  (plan.map_data?.travel_tips?.food?.length ? plan.map_data.travel_tips.food : (plan.map_data?.food ?? []).map((item) => item.name))
+    .slice(0, 3);
+
+const hotelItems = (plan: TravelPlanResult) =>
+  (plan.map_data?.travel_tips?.hotel?.length ? plan.map_data.travel_tips.hotel : (plan.map_data?.hotels ?? []).map((item) => item.name))
+    .slice(0, 2);
+
+const allPois = (plan: TravelPlanResult) => [
+  ...(plan.map_data?.attractions ?? []),
+  ...(plan.map_data?.food ?? []),
+  ...(plan.map_data?.hotels ?? []),
+];
+
+const poiForActivity = (plan: TravelPlanResult, activity?: Activity): POI | null => {
+  if (!activity) return null;
+  if (activity.coordinate) {
+    return {
+      ...(allPois(plan).find((poi) => poi.photo && (poi.name.includes(activity.name) || activity.name.includes(poi.name))) ?? {}),
+      id: activity.id,
+      name: activity.name,
+      type: activity.type,
+      address: activity.location,
+      location: activity.coordinate,
+      source: activity.source,
+      photo: activity.photo || allPois(plan).find((poi) => poi.photo && (poi.name.includes(activity.name) || activity.name.includes(poi.name)))?.photo,
+    };
+  }
+  return allPois(plan).find((poi) => poi.name && (poi.name.includes(activity.name) || activity.name.includes(poi.name))) ?? {
+    id: activity.id,
+    name: activity.name,
+    type: activity.type,
+    address: activity.location,
+    location: null,
+    source: activity.source,
+    photo: activity.photo,
+  };
+};
+
+export function EditPlanPage({ plan, onSave, onOptimize, initialChanges = [], initialDay = 0 }: EditPlanPageProps) {
+  const [selectedDay, setSelectedDay] = useState(initialDay);
   const [saved, setSaved] = useState(false);
-  const [selectedChanges, setSelectedChanges] = useState<string[]>([]);
+  const [selectedChanges, setSelectedChanges] = useState<string[]>(initialChanges);
+  const [selectedPoi, setSelectedPoi] = useState<POI | null>(null);
   const day = plan.daily_plans?.[selectedDay] ?? plan.daily_plans?.[0];
+  const budgets = useMemo(() => budgetItems(plan), [plan]);
+  const foods = useMemo(() => foodItems(plan), [plan]);
+  const hotels = useMemo(() => hotelItems(plan), [plan]);
 
   const activities = useMemo(
-    () =>
-      [
-        ...(day?.activities ?? []).slice(0, 3),
-        ...((day?.meals ?? []).filter((meal) => meal.time.includes("晚") || meal.type === "dinner").slice(0, 1)).map((meal) => ({
-          id: meal.id,
-          name: meal.name,
-          location: meal.location,
-          time: meal.time,
-          cost: meal.cost,
-          transport: "步行",
-        })),
-      ].slice(0, 4),
+    () => (day?.activities ?? []).filter((activity) => !isTransferActivity(activity)).slice(0, 4),
     [day],
   );
+
+  useEffect(() => {
+    setSelectedDay(initialDay);
+    setSelectedChanges(initialChanges);
+  }, [initialChanges, initialDay]);
 
   const title = `${plan.destination || "杭州"} ${plan.duration || 3} 日轻松游`;
   const toggleChange = (text: string) => {
     setSelectedChanges((current) =>
       current.includes(text) ? current.filter((item) => item !== text) : [...current, text],
     );
-  };
-  const addChange = (text: string) => {
-    setSelectedChanges((current) => (current.includes(text) ? current : [...current, text]));
   };
 
   const submitChanges = () => {
@@ -76,7 +128,7 @@ export function EditPlanPage({ plan, onSave, onOptimize }: EditPlanPageProps) {
 
   return (
     <section className="min-h-[calc(100vh-68px)] bg-gradient-to-br from-cyan-50 via-white to-white">
-      <div className="mx-auto max-w-[1360px] px-8 py-10">
+      <div className="mx-auto max-w-[1500px] px-8 py-10">
         <div className="mb-7 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="flex items-center gap-3">
@@ -108,7 +160,7 @@ export function EditPlanPage({ plan, onSave, onOptimize }: EditPlanPageProps) {
           </div>
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[1fr_390px]">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
           <div className="rounded-2xl border border-slate-200 bg-white/92 shadow-sm">
             <div className="flex border-b border-slate-100 px-6">
               {(plan.daily_plans?.length ? plan.daily_plans : [{ day: 1 }]).map((item, index) => (
@@ -123,42 +175,90 @@ export function EditPlanPage({ plan, onSave, onOptimize }: EditPlanPageProps) {
             </div>
 
             <div className="p-6">
-              {slots.map((slot, index) => {
+              {activities.map((item, index) => {
+                const slot = slots[index] ?? { label: item.time || `时段 ${index + 1}`, time: item.time || "", icon: Sparkles };
                 const Icon = slot.icon;
-                const item = activities[index];
+                const itemCost = formatCost(item.cost);
+                const image = activityImage(plan, item, index);
                 return (
-                  <div key={slot.label} className="grid gap-6 border-b border-slate-100 py-5 last:border-0 lg:grid-cols-[110px_1fr_34px]">
-                    <div className="flex gap-3 lg:block">
-                      <Icon className="h-5 w-5 text-[#0da8ad]" />
-                      <div className="mt-1 text-lg font-black">{slot.label}</div>
-                      <div className="mt-1 text-sm font-medium text-slate-500">{slot.time}</div>
-                    </div>
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                      <div className="grid gap-4 md:grid-cols-[120px_1fr_160px]">
-                        <img src={images[index % images.length]} alt="" className="h-24 w-full rounded-xl object-cover" />
-                        <div>
-                          <div className="text-lg font-black">{item?.name || `${plan.destination}自由活动`}</div>
-                          <div className="mt-2 flex flex-wrap gap-4 text-sm font-medium text-slate-500">
-                            <span className="flex items-center gap-1"><Clock className="h-4 w-4" />{slot.time}</span>
-                            <span className="flex items-center gap-1"><Bus className="h-4 w-4" />步行</span>
+                  <div key={`${item.id}-${index}`} className="border-b border-slate-100 py-5 last:border-0">
+                    <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <div className="space-y-4">
+                        <div className="flex flex-wrap items-start gap-5">
+                          <div className="w-24 shrink-0">
+                            <Icon className="mb-2 h-5 w-5 text-[#0da8ad]" />
+                            <div className="text-lg font-black">{slot.label}</div>
+                            <div className="mt-1 text-sm font-medium text-slate-500">{slot.time}</div>
                           </div>
-                          <div className="mt-3 text-sm font-medium text-slate-500">预计费用 <span className="font-black text-[#0da8ad]">{formatCost(item?.cost)}</span></div>
+                          <div className="min-w-[260px] flex-1">
+                            <div className="text-xl font-black leading-snug break-words">{item.name}</div>
+                            <div className="mt-1 text-sm font-medium text-slate-500">{item.location || plan.destination}</div>
+                            <div className="mt-3 flex flex-wrap gap-2 text-sm font-semibold text-slate-600">
+                              <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5">
+                                <Clock className="h-4 w-4 text-[#0da8ad]" />
+                                {slot.time}
+                              </span>
+                              <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5">
+                                <Bus className="h-4 w-4 text-[#0da8ad]" />
+                                步行
+                              </span>
+                              {itemCost && (
+                                <span className="rounded-full border border-slate-200 px-3 py-1.5">
+                                  预计费用 <span className="font-black text-[#0da8ad]">{itemCost}</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 text-sm font-semibold">
-                          <button onClick={() => addChange(`删除${slot.label}${item?.name ? `：${item.name}` : "空时段"}`)} className="rounded-lg text-rose-500 hover:bg-rose-50"><Trash2 className="mr-1 inline h-4 w-4" />删除</button>
-                          <button onClick={() => addChange(`替换${slot.label}${item?.name ? `：${item.name}` : "空时段"}`)} className="rounded-lg text-[#0da8ad] hover:bg-cyan-50"><RefreshCw className="mr-1 inline h-4 w-4" />替换</button>
-                          <button onClick={() => addChange(`调整${slot.label}时间`)} className="col-span-2 rounded-lg text-slate-600 hover:bg-slate-50"><Clock className="mr-1 inline h-4 w-4" />调整时间</button>
+                        <div className="rounded-xl bg-slate-50 px-5 py-4 text-sm font-semibold leading-7 text-slate-600">
+                          {activityDescriptionForCard(item)}
+                        </div>
+                        {image && <img src={image} alt="" className="h-48 w-full rounded-xl object-cover" />}
+                        <div className="flex flex-wrap gap-2 text-sm font-semibold">
+                            <button
+                              onClick={() => {
+                                const poi = poiForActivity(plan, item);
+                                if (poi) setSelectedPoi(poi);
+                              }}
+                              className="inline-flex h-9 items-center gap-1 rounded-full border border-slate-200 px-3 text-[#0da8ad] hover:border-[#10b8bd] hover:bg-cyan-50 disabled:text-slate-300 disabled:hover:border-slate-200 disabled:hover:bg-transparent"
+                              disabled={!poiForActivity(plan, item)}
+                            >
+                              <MapPin className="h-4 w-4" />
+                              地图
+                            </button>
+                            <ActionButton
+                              icon={Trash2}
+                              label="删除"
+                              active={selectedChanges.includes(`删除${slot.label}：${item.name}`)}
+                              tone="danger"
+                              onClick={() => toggleChange(`删除${slot.label}：${item.name}`)}
+                            />
+                            <ActionButton
+                              icon={RefreshCw}
+                              label="替换"
+                              active={selectedChanges.includes(`替换${slot.label}：${item.name}`)}
+                              onClick={() => toggleChange(`替换${slot.label}：${item.name}`)}
+                            />
+                            <ActionButton
+                              icon={Clock}
+                              label="调时"
+                              active={selectedChanges.includes(`调整${slot.label}时间`)}
+                              tone="muted"
+                              onClick={() => toggleChange(`调整${slot.label}时间`)}
+                            />
                         </div>
                       </div>
                     </div>
-                    <div className="hidden items-center justify-center text-slate-300 lg:flex">::</div>
                   </div>
                 );
               })}
             </div>
+            <div className="border-t border-slate-100 p-6">
+              <RouteMap mapData={plan.map_data} heightClass="min-h-[420px]" />
+            </div>
           </div>
 
-          <aside className="space-y-5">
+          <aside className="space-y-5 xl:sticky xl:top-24 xl:self-start">
             <Panel title="你想怎么改？">
               <div className="grid grid-cols-2 gap-3">
                 {changeOptions.map(([text, Icon]) => {
@@ -186,22 +286,33 @@ export function EditPlanPage({ plan, onSave, onOptimize }: EditPlanPageProps) {
               </div>
             </Panel>
 
-            <Panel title="修改影响预览">
-              {[
-                ["预计步行减少 30%", "约减少 2.6 公里步行"],
-                ["预算减少 200 元", "人均从 ¥215 降至 ¥15"],
-                ["下午路线已调整", "将替换为更轻松的景点组合"],
-                ["不会影响 Day 1 和 Day 3", "仅调整当前日期内容"],
-              ].map(([titleText, desc]) => (
-                <div key={titleText} className="mb-3 rounded-xl border border-slate-100 bg-white p-4">
-                  <div className="font-bold text-slate-900">{titleText}</div>
-                  <div className="mt-1 text-sm text-slate-500">{desc}</div>
+            <Panel title="方案信息">
+              {!!budgets.length && <InfoBlock icon={Wallet} title="预算估算" items={budgets} />}
+              <InfoBlock icon={Bed} title="住宿推荐" items={hotels.length ? hotels : ["住宿区域待补充"]} />
+              <InfoBlock icon={Utensils} title="美食清单" items={foods.length ? foods : ["美食信息待补充"]} />
+            </Panel>
+
+            <Panel title="待确认修改">
+              {selectedChanges.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {selectedChanges.map((item) => (
+                    <button
+                      key={item}
+                      onClick={() => toggleChange(item)}
+                      className="rounded-full bg-cyan-50 px-3 py-2 text-sm font-bold text-[#0b7f84] hover:bg-cyan-100"
+                    >
+                      {item}
+                    </button>
+                  ))}
                 </div>
-              ))}
+              ) : (
+                <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-500">未选择修改项</div>
+              )}
             </Panel>
           </aside>
         </div>
       </div>
+      {selectedPoi && <PlaceDetailModal plan={plan} initialPoi={selectedPoi} onClose={() => setSelectedPoi(null)} />}
     </section>
   );
 }
@@ -212,5 +323,46 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
       <div className="mb-4 text-xl font-black">{title}</div>
       {children}
     </div>
+  );
+}
+
+function InfoBlock({ icon: Icon, title, items }: { icon: typeof Wallet; title: string; items: string[] }) {
+  return (
+    <div className="mb-4 last:mb-0">
+      <div className="mb-2 flex items-center gap-2 text-sm font-black text-slate-900">
+        <Icon className="h-4 w-4 text-[#0da8ad]" />
+        {title}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {items.map((item) => (
+          <div key={item} className="rounded-full bg-slate-50 px-3 py-2 text-sm font-semibold leading-6 text-slate-600">
+            {item}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ActionButton({
+  icon: Icon,
+  label,
+  active,
+  tone = "primary",
+  onClick,
+}: {
+  icon: typeof RefreshCw;
+  label: string;
+  active: boolean;
+  tone?: "primary" | "danger" | "muted";
+  onClick: () => void;
+}) {
+  const activeClass = tone === "danger" ? "border-rose-200 bg-rose-50 text-rose-600" : "border-[#10b8bd] bg-cyan-50 text-[#0da8ad]";
+  const idleClass = tone === "danger" ? "text-rose-500 hover:bg-rose-50" : tone === "muted" ? "text-slate-600 hover:bg-slate-50" : "text-[#0da8ad] hover:bg-cyan-50";
+  return (
+    <button onClick={onClick} className={`inline-flex h-9 items-center gap-1 rounded-full border px-3 ${active ? activeClass : `border-transparent ${idleClass}`}`}>
+      <Icon className="h-4 w-4" />
+      {label}
+    </button>
   );
 }

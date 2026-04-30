@@ -192,6 +192,9 @@ def _apply_runtime_api_settings(api_settings: dict[str, Any]) -> None:
     qweather_key = _clean_text(api_settings.get("qweather_api_key"))
     qweather_host = _clean_text(api_settings.get("qweather_host"))
     amap_service_key = _clean_text(api_settings.get("amap_service_key") or api_settings.get("amap_api_key"))
+    web_search_provider = _clean_text(api_settings.get("web_search_provider"))
+    web_search_key = _clean_text(api_settings.get("web_search_api_key"))
+    web_search_base_url = _clean_text(api_settings.get("web_search_base_url"))
 
     if llm_provider:
         settings.llm_provider = llm_provider
@@ -212,11 +215,17 @@ def _apply_runtime_api_settings(api_settings: dict[str, Any]) -> None:
 
     if amap_service_key:
         settings.amap_api_key = amap_service_key
+    if web_search_provider:
+        settings.web_search_provider = web_search_provider
+    if web_search_key:
+        settings.web_search_api_key = web_search_key
+    if web_search_base_url:
+        settings.web_search_base_url = web_search_base_url
 
 
 def _redact_api_settings(api_settings: dict[str, Any]) -> dict[str, Any]:
     redacted = dict(api_settings)
-    for key in ("llm_api_key", "qweather_api_key", "amap_api_key", "amap_service_key"):
+    for key in ("llm_api_key", "qweather_api_key", "amap_api_key", "amap_service_key", "web_search_api_key"):
         if redacted.get(key):
             redacted[key] = "***"
     return redacted
@@ -239,6 +248,9 @@ def _assemble_travel_plan(agent_outputs: dict[str, Any]) -> dict[str, Any]:
         "duration": int(intent.get("duration") or 3),
         "start_date": intent.get("start_date") or "",
         "budget": int(intent.get("budget") or 3000),
+        "budget_source": intent.get("budget_source") or (budget.get("budget_source") if isinstance(budget, dict) else "user"),
+        "plan_variant": intent.get("plan_variant") or "标准版",
+        "variant_profile": intent.get("variant_profile") or {},
         "preferences": preferences,
         "weather": weather,
         "daily_plans": _normalize_daily_plans(planner.get("daily_plans", [])),

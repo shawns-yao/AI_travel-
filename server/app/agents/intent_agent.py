@@ -61,10 +61,13 @@ class IntentAgent(BaseAgent):
                 "duration": 3,
                 "start_date": "",
                 "all_dates": "",
-                "budget": 3000,
+                "budget": None,
+                "budget_source": "estimated",
                 "preferences": [],
                 "extra_requirements": "",
                 "travelers": 1,
+                "plan_variant": "",
+                "variant_profile": {},
             })
             parsed = self._normalize_parsed(parsed, query)
 
@@ -92,14 +95,19 @@ class IntentAgent(BaseAgent):
     @staticmethod
     def _fallback_parse(query: str) -> dict:
         duration = 3
-        budget = 3000
+        budget = None
+        budget_source = "estimated"
         destination = ""
+        travelers = 1
 
+        structured_destination = re.search(r"目的地[:：]\s*([^，,。.；;\s]+)", query)
         city_match = re.search(r"去([^，,。.\s]+?)(?:玩|旅游|旅行|出行|度假)", query)
-        if city_match:
+        if structured_destination:
+            destination = structured_destination.group(1)
+        elif city_match:
             destination = city_match.group(1)
         else:
-            for city in ["北京", "上海", "广州", "深圳", "杭州", "成都", "重庆", "西安", "南京", "苏州", "厦门", "青岛", "大理", "丽江", "三亚"]:
+            for city in ["北京", "上海", "广州", "深圳", "杭州", "成都", "重庆", "西安", "南京", "苏州", "厦门", "鼓浪屿", "青岛", "大理", "丽江", "三亚"]:
                 if city in query:
                     destination = city
                     break
@@ -114,9 +122,23 @@ class IntentAgent(BaseAgent):
                     duration = value
                     break
 
-        budget_match = re.search(r"预算\s*(\d+)", query)
+        people_match = re.search(r"(\d+)\s*(?:人|位|个大人|个朋友)", query)
+        if people_match:
+            travelers = max(1, int(people_match.group(1)))
+        elif re.search(r"父母同行|爸妈|父母", query):
+            travelers = 3
+        elif re.search(r"情侣|两个人|两人", query):
+            travelers = 2
+
+        budget_match = re.search(r"预算\s*[:：]?\s*(?:约|大概|共)?\s*(\d+(?:\.\d+)?)\s*(万|千|k|K)?", query)
         if budget_match:
-            budget = int(budget_match.group(1))
+            raw = float(budget_match.group(1))
+            unit = budget_match.group(2)
+            multiplier = 10000 if unit == "万" else 1000 if unit in {"千", "k", "K"} else 1
+            budget = int(raw * multiplier)
+            budget_source = "user"
+        else:
+            budget = IntentAgent._estimate_budget(destination, duration, travelers)
 
         preference_words = ["自然风光", "美食", "亲子", "文化", "历史", "博物馆", "轻松", "徒步", "购物", "摄影"]
         preferences = [word for word in preference_words if word in query]
@@ -124,15 +146,21 @@ class IntentAgent(BaseAgent):
         start = IntentAgent._default_start_date()
         all_dates = ",".join((start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(duration))
 
+        plan_variant = IntentAgent._infer_plan_variant(query)
+        variant_profile = IntentAgent._variant_profile(plan_variant)
+
         return {
             "destination": destination or "目的地",
             "duration": duration,
             "start_date": start.strftime("%Y-%m-%d"),
             "all_dates": all_dates,
             "budget": budget,
+            "budget_source": budget_source,
             "preferences": preferences,
             "extra_requirements": query,
-            "travelers": 1,
+            "travelers": travelers,
+            "plan_variant": plan_variant,
+            "variant_profile": variant_profile,
         }
 
     @staticmethod
@@ -143,7 +171,6 @@ class IntentAgent(BaseAgent):
 
         normalized = dict(parsed)
         normalized["destination"] = str(normalized.get("destination") or fallback["destination"])
-        normalized["budget"] = int(normalized.get("budget") or fallback["budget"])
         normalized["travelers"] = int(normalized.get("travelers") or fallback["travelers"])
 
         try:
@@ -152,8 +179,25 @@ class IntentAgent(BaseAgent):
             duration = fallback["duration"]
         normalized["duration"] = max(1, min(duration, 14))
 
+        if IntentAgent._has_explicit_budget(query):
+            normalized["budget"] = int(normalized.get("budget") or fallback["budget"])
+            normalized["budget_source"] = "user"
+        else:
+            normalized["budget"] = IntentAgent._estimate_budget(
+                normalized["destination"],
+                normalized["duration"],
+                normalized["travelers"],
+            )
+            normalized["budget_source"] = "estimated"
+
         preferences = normalized.get("preferences")
         normalized["preferences"] = preferences if isinstance(preferences, list) else fallback["preferences"]
+        plan_variant = str(normalized.get("plan_variant") or "").strip() or IntentAgent._infer_plan_variant(query)
+        normalized["plan_variant"] = plan_variant
+        normalized["variant_profile"] = IntentAgent._variant_profile(plan_variant)
+        for tag in normalized["variant_profile"].get("strategy_tags", []):
+            if tag not in normalized["preferences"]:
+                normalized["preferences"].append(tag)
 
         start_date = str(normalized.get("start_date") or "").strip()
         dates = IntentAgent._parse_dates(str(normalized.get("all_dates") or ""))
@@ -172,6 +216,69 @@ class IntentAgent(BaseAgent):
         normalized["all_dates"] = ",".join(dates[: normalized["duration"]])
         normalized.setdefault("extra_requirements", "")
         return normalized
+
+    @staticmethod
+    def _infer_plan_variant(query: str) -> str:
+        if any(word in query for word in ["省钱版", "省钱", "预算低", "性价比", "公共交通优先", "地铁沿线"]):
+            return "省钱版"
+        if any(word in query for word in ["深度游版", "深度游", "小众", "文化体验", "更紧凑", "4到5个地点", "4-5个地点"]):
+            return "深度游版"
+        if any(word in query for word in ["舒适版", "少走路", "轻松", "父母", "老人", "核心区域"]):
+            return "舒适版"
+        return "标准版"
+
+    @staticmethod
+    def _variant_profile(plan_variant: str) -> dict:
+        profiles = {
+            "舒适版": {
+                "name": "舒适版",
+                "pace": "relaxed",
+                "transport": "taxi_or_short_walk",
+                "hotel": "core_area",
+                "daily_spots": 3,
+                "budget_strategy": "comfort_first",
+                "strategy_tags": ["少走路", "核心区住宿", "2-3个精华景点", "舒适交通"],
+            },
+            "省钱版": {
+                "name": "省钱版",
+                "pace": "balanced",
+                "transport": "public_transit",
+                "hotel": "metro_line",
+                "daily_spots": 3,
+                "budget_strategy": "save_money",
+                "strategy_tags": ["公共交通优先", "地铁沿线住宿", "免费/低价景点", "平价本地餐饮"],
+            },
+            "深度游版": {
+                "name": "深度游版",
+                "pace": "compact",
+                "transport": "walk_and_transit",
+                "hotel": "near_next_route",
+                "daily_spots": 4,
+                "budget_strategy": "experience_first",
+                "strategy_tags": ["小众路线", "文化体验优先", "每天4-5个地点", "节奏紧凑"],
+            },
+        }
+        return profiles.get(plan_variant) or {
+            "name": "标准版",
+            "pace": "balanced",
+            "transport": "mixed",
+            "hotel": "route_friendly",
+            "daily_spots": 3,
+            "budget_strategy": "balanced",
+            "strategy_tags": ["路线连贯", "预算均衡", "景点优先"],
+        }
+
+    @staticmethod
+    def _has_explicit_budget(query: str) -> bool:
+        return bool(re.search(r"预算\s*[:：]?\s*(?:约|大概|共)?\s*\d", query))
+
+    @staticmethod
+    def _estimate_budget(destination: str, duration: int, travelers: int) -> int:
+        base_per_person_day = 650
+        premium_destinations = ["北京", "上海", "三亚", "鼓浪屿", "厦门", "杭州"]
+        if any(city in destination for city in premium_destinations):
+            base_per_person_day = 800
+        return max(800, int(duration) * max(1, int(travelers)) * base_per_person_day)
 
     @staticmethod
     def _default_start_date():
